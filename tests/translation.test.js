@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const settingsApi = require("../settings.js");
 
 const root = path.resolve(__dirname, "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
@@ -86,6 +87,7 @@ function loadBackgroundHelpers({
   },
 } = {}) {
   const listeners = { addListener() {} };
+  const runtimeMessageListeners = [];
   const localStorage = { ytd_settings: settings };
   const sandbox = {
     console,
@@ -120,25 +122,33 @@ function loadBackgroundHelpers({
       sidePanel,
       runtime: {
         onInstalled: listeners,
-        onMessage: listeners,
+        onMessage: {
+          addListener(listener) {
+            runtimeMessageListeners.push(listener);
+          },
+        },
         openOptionsPage() {},
         getURL: (resourcePath) => `chrome-extension://test/${resourcePath}`,
         sendMessage: () => Promise.resolve({ success: true }),
       },
       tabs: { onUpdated: listeners, onActivated: listeners },
     },
-    YTD_SETTINGS: {
-      STORAGE_KEY: "ytd_settings",
-      normalize: (value) => value,
-      chatCompletionsUrl: () =>
-        "https://api.kimi.com/coding/v1/chat/completions",
-      canonicalYouTubeUrl: (videoId) =>
-        `https://www.youtube.com/watch?v=${videoId}`,
-    },
   };
   sandbox.globalThis = sandbox;
+  vm.runInNewContext(read("settings.js"), sandbox);
+  vm.runInNewContext(read("ai-providers.js"), sandbox);
   vm.runInNewContext(read("background.js"), sandbox);
-  return sandbox.__YTD_TRANSLATION_TESTING__;
+  return {
+    ...sandbox.__YTD_TRANSLATION_TESTING__,
+    dispatchRuntimeMessage(message) {
+      return new Promise((resolve) => {
+        const handled = runtimeMessageListeners.some(
+          (listener) => listener(message, {}, resolve) === true,
+        );
+        if (!handled) resolve(undefined);
+      });
+    },
+  };
 }
 
 test("non-YouTube tabs explicitly close before their panel is disabled", async () => {
@@ -481,7 +491,7 @@ test("background rejects unsupported language fallthrough and malformed batches"
   );
 });
 
-test("all AI product requests use the Kimi endpoint without provider-only fields", async () => {
+test("the default AI request uses Kimi without provider-only fields", async () => {
   const kimiRequests = [];
   const successfulFetch = (requests) => async (url, options) => {
     requests.push({ url, body: JSON.parse(options.body) });
@@ -497,8 +507,8 @@ test("all AI product requests use the Kimi endpoint without provider-only fields
     fetchImpl: successfulFetch(kimiRequests),
   });
   const kimiResult = await kimi.requestAiCompletion({
+    system: "Translate accurately.",
     maxTokens: 128,
-    responseFormat: { type: "json_object" },
     messages: [{ role: "user", content: "Hello." }],
   });
   assert.equal(kimiResult.text, "translated");
@@ -507,6 +517,10 @@ test("all AI product requests use the Kimi endpoint without provider-only fields
     "https://api.kimi.com/coding/v1/chat/completions",
   );
   assert.equal(kimiRequests[0].body.model, "kimi-for-coding");
+  assert.deepEqual(kimiRequests[0].body.messages[0], {
+    role: "system",
+    content: "Translate accurately.",
+  });
   assert.equal(Object.hasOwn(kimiRequests[0].body, "thinking"), false);
   assert.equal(Object.hasOwn(kimiRequests[0].body, "response_format"), false);
 
@@ -527,6 +541,141 @@ test("all AI product requests use the Kimi endpoint without provider-only fields
       new RegExp(`async function ${callPath}\\([\\s\\S]*?requestAiCompletion\\(\\{`),
     );
   }
+});
+
+test("OpenRouter, Anthropic, and Gemini each use their isolated runtime contract", async () => {
+  const cases = [
+    {
+      providerId: "openrouter",
+      profile: { apiKey: "router-key", model: "openai/gpt-5" },
+      response: { choices: [{ message: { content: "router answer" } }] },
+      expectedUrl: "https://openrouter.ai/api/v1/chat/completions",
+      expectedHeader: ["Authorization", "Bearer router-key"],
+      expectedText: "router answer",
+    },
+    {
+      providerId: "anthropic",
+      profile: { apiKey: "claude-key", model: "claude-model" },
+      response: { content: [{ type: "text", text: "claude answer" }] },
+      expectedUrl: "https://api.anthropic.com/v1/messages",
+      expectedHeader: ["x-api-key", "claude-key"],
+      expectedText: "claude answer",
+    },
+    {
+      providerId: "gemini",
+      profile: { apiKey: "gemini-key", model: "gemini-model" },
+      response: {
+        candidates: [{ content: { parts: [{ text: "gemini answer" }] } }],
+      },
+      expectedUrl:
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-model:generateContent",
+      expectedHeader: ["x-goog-api-key", "gemini-key"],
+      expectedText: "gemini answer",
+    },
+  ];
+
+  for (const current of cases) {
+    const requests = [];
+    const stored = settingsApi.normalize({
+      aiConfigVersion: 2,
+      activeProvider: current.providerId,
+      providers: { [current.providerId]: current.profile },
+      supadataApiKey: "supadata-key",
+    });
+    const helpers = loadBackgroundHelpers({
+      settings: stored,
+      fetchImpl: async (url, options) => {
+        requests.push({
+          url,
+          headers: options.headers,
+          body: JSON.parse(options.body),
+        });
+        return { ok: true, status: 200, json: async () => current.response };
+      },
+    });
+
+    const result = await helpers.requestAiCompletion({
+      system: "System instructions",
+      messages: [{ role: "user", content: "Hello" }],
+      maxTokens: 64,
+      temperature: 0.2,
+    });
+
+    assert.equal(result.text, current.expectedText);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, current.expectedUrl);
+    assert.equal(
+      requests[0].headers[current.expectedHeader[0]],
+      current.expectedHeader[1],
+    );
+  }
+});
+
+test("public configuration status identifies the provider without exposing keys", async () => {
+  const stored = settingsApi.normalize({
+    aiConfigVersion: 2,
+    activeProvider: "openrouter",
+    providers: {
+      openrouter: { apiKey: "router-key", model: "openai/gpt-5" },
+    },
+    supadataApiKey: "supadata-key",
+  });
+  const helpers = loadBackgroundHelpers({ settings: stored });
+
+  const status = await helpers.dispatchRuntimeMessage({ action: "checkConfig" });
+  assert.deepEqual(JSON.parse(JSON.stringify(status)), {
+    hasSupadataKey: true,
+    hasAiKey: true,
+    aiProviderName: "OpenRouter",
+  });
+  assert.equal(JSON.stringify(status).includes("router-key"), false);
+});
+
+test("product errors name the selected provider instead of Kimi", async () => {
+  const missingKeySettings = settingsApi.normalize({
+    aiConfigVersion: 2,
+    activeProvider: "openrouter",
+    providers: {
+      openrouter: { apiKey: "", model: "openai/gpt-5" },
+    },
+  });
+  const missing = await loadBackgroundHelpers({
+    settings: missingKeySettings,
+  }).handleTranslateContent(
+    { segments: [{ id: "segment-0-0", text: "English source sentence." }] },
+    "transcriptBatch",
+    "zh",
+    "Video",
+  );
+  assert.equal(missing.success, false);
+  assert.match(missing.error, /OpenRouter/);
+  assert.doesNotMatch(missing.error, /Kimi/);
+
+  let requests = 0;
+  const limitedSettings = settingsApi.normalize({
+    aiConfigVersion: 2,
+    activeProvider: "openrouter",
+    providers: {
+      openrouter: { apiKey: "router-key", model: "openai/gpt-5" },
+    },
+  });
+  const limited = await loadBackgroundHelpers({
+    settings: limitedSettings,
+    fetchImpl: async () => {
+      requests += 1;
+      return {
+        ok: false,
+        status: 429,
+        json: async () => ({ error: { message: "Quota exceeded" } }),
+      };
+    },
+  }).callAiTranslation("Translate accurately.", "Hello.", {
+    maxTokens: 32,
+  });
+  assert.equal(limited.success, false);
+  assert.equal(limited.code, "RATE_LIMITED");
+  assert.match(limited.error, /OpenRouter/);
+  assert.equal(requests, 1);
 });
 
 test("blank-line chunks reset provider idle timeout and valid JSON succeeds", async () => {

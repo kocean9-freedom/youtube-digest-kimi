@@ -4,7 +4,7 @@
  * This is the "brain" of the extension. It runs in the background and handles:
  * 1. Opening the side panel when the user clicks the extension icon
  * 2. Fetching YouTube transcripts via Supadata API
- * 3. Calling Kimi Code to analyze the transcript
+ * 3. Calling the user-selected AI provider to analyze the transcript
  * 4. Sending results back to the side panel
  *
  * Think of it like a backend server — it does the heavy lifting
@@ -13,7 +13,7 @@
 
 // Import safe defaults and validation helpers. Secret keys live in
 // chrome.storage.local and are never part of the extension source.
-importScripts("settings.js");
+importScripts("settings.js", "ai-providers.js");
 
 const DEBUG = false;
 const AI_PROVIDER_IDLE_TIMEOUT_MS = 50_000;
@@ -73,26 +73,20 @@ async function loadPromptSection(fileName, heading, variables = {}) {
 }
 
 async function requestAiCompletion({
+  system,
   messages,
   maxTokens,
   temperature,
 }) {
   const settings = await getSettings();
-  if (!settings.aiApiKey) {
-    const error = new Error(
-      "Kimi Code API key not configured. Open YouTube Digest Settings.",
-    );
-    error.code = "NO_AI_KEY";
-    throw error;
-  }
-  const body = {
-    model: settings.aiModel,
-    max_tokens: maxTokens,
+  const provider = YTD_SETTINGS.getActiveProvider(settings);
+  const profile = YTD_SETTINGS.getActiveProfile(settings);
+  const request = YTD_AI_PROVIDERS.buildRequest(provider, profile, {
+    system,
     messages,
-  };
-  if (typeof temperature === "number") body.temperature = temperature;
-  // Kimi K2.7 Code requires Thinking ON. Omitting provider-only thinking fields
-  // preserves the Kimi Coding Plan default instead of forcing a model downgrade.
+    maxTokens,
+    temperature,
+  });
 
   const controller = new AbortController();
   let timeoutKind = "";
@@ -117,65 +111,54 @@ async function requestAiCompletion({
   );
   resetIdleTimeout();
   try {
-    const response = await fetch(
-      YTD_SETTINGS.chatCompletionsUrl(),
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${settings.aiApiKey}`,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      },
-    );
+    const response = await fetch(request.url, {
+      method: "POST",
+      headers: request.headers,
+      body: JSON.stringify(request.body),
+      signal: controller.signal,
+    });
     // Receiving headers proves the provider is still making progress. It may
     // then send blank-line body chunks while a non-streaming request queues.
     resetIdleTimeout();
 
-    const data = await readBoundedAiResponse(response, resetIdleTimeout);
+    const data = await readBoundedAiResponse(
+      response,
+      resetIdleTimeout,
+      provider,
+    );
     if (!response.ok) {
-      const errorData = data && typeof data === "object" ? data : {};
-      const error = new Error(
-        errorData.error?.message ||
-          errorData.message ||
-          `Kimi Code error: ${response.status}`,
-      );
-      error.status = response.status;
-      throw error;
+      throw YTD_AI_PROVIDERS.createHttpError(provider, response.status, data);
     }
 
-    const text = data.choices?.[0]?.message?.content;
-    if (typeof text !== "string" || !text.trim()) {
-      const error = new Error("Kimi Code returned an empty response.");
-      error.code = "EMPTY_AI_RESPONSE";
-      throw error;
-    }
+    const text = YTD_AI_PROVIDERS.parseResponse(provider, data);
 
-    return { text, settings };
+    return { text, settings, provider };
   } catch (error) {
     if (timeoutKind === "idle") {
       const timeoutError = new Error(
-        "Kimi Code request was inactive for 50 seconds. Please Retry.",
+        `${provider.name} request was inactive for 50 seconds. Please Retry.`,
       );
       timeoutError.code = "AI_IDLE_TIMEOUT";
+      timeoutError.provider = provider.id;
       throw timeoutError;
     }
     if (timeoutKind === "hard") {
       const timeoutError = new Error(
-        "Kimi Code request exceeded the 120-second limit. Please Retry.",
+        `${provider.name} request exceeded the 120-second limit. Please Retry.`,
       );
       timeoutError.code = "AI_HARD_TIMEOUT";
+      timeoutError.provider = provider.id;
       throw timeoutError;
     }
-    throw error;
+    throw YTD_AI_PROVIDERS.normalizeError(provider, error);
   } finally {
     clearTimeout(idleTimeoutId);
     clearTimeout(hardTimeoutId);
   }
 }
 
-async function readBoundedAiResponse(response, onActivity) {
+async function readBoundedAiResponse(response, onActivity, provider) {
+  const providerName = provider?.name || "AI provider";
   const reader = response.body?.getReader?.();
   if (reader) {
     const decoder = new TextDecoder();
@@ -190,8 +173,11 @@ async function readBoundedAiResponse(response, onActivity) {
       responseBytes += byteLength;
       if (responseBytes > AI_PROVIDER_MAX_RESPONSE_BYTES) {
         await reader.cancel?.().catch(() => {});
-        const error = new Error("Kimi Code response exceeded the 2 MiB limit.");
+        const error = new Error(
+          `${providerName} response exceeded the 2 MiB limit.`,
+        );
         error.code = "AI_RESPONSE_TOO_LARGE";
+        error.provider = provider?.id;
         throw error;
       }
       responseText += decoder.decode(value, { stream: true });
@@ -207,8 +193,11 @@ async function readBoundedAiResponse(response, onActivity) {
     onActivity();
     const byteLength = new TextEncoder().encode(responseText).byteLength;
     if (byteLength > AI_PROVIDER_MAX_RESPONSE_BYTES) {
-      const error = new Error("Kimi Code response exceeded the 2 MiB limit.");
+      const error = new Error(
+        `${providerName} response exceeded the 2 MiB limit.`,
+      );
       error.code = "AI_RESPONSE_TOO_LARGE";
+      error.provider = provider?.id;
       throw error;
     }
     return JSON.parse(responseText.trimStart());
@@ -431,12 +420,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === "checkConfig") {
     getSettings()
-      .then((settings) =>
+      .then((settings) => {
+        const provider = YTD_SETTINGS.getActiveProvider(settings);
         sendResponse({
           hasSupadataKey: !!settings.supadataApiKey,
-          hasAiKey: !!settings.aiApiKey,
-        }),
-      )
+          hasAiKey: !!YTD_SETTINGS.getActiveCredential(settings),
+          aiProviderName: provider.name,
+        });
+      })
       .catch((error) => sendResponse({ error: error.message }));
     return true;
   }
@@ -894,7 +885,7 @@ function parseLooseJson(text) {
 // ============================================================
 
 /**
- * Sends the transcript to Kimi Code for analysis.
+ * Sends the transcript to the selected AI provider for analysis.
  *
  * The prompt asks the model to produce chapters covering the whole video
  * and 3-5 key quotes with timestamps.
@@ -913,11 +904,12 @@ async function handleAnalyzeTranscript(
 ) {
   try {
     const settings = await getSettings();
-    if (!settings.aiApiKey) {
+    const provider = YTD_SETTINGS.getActiveProvider(settings);
+    if (!YTD_SETTINGS.getActiveCredential(settings)) {
       return {
         success: false,
         error: "NO_AI_KEY",
-        message: "Kimi Code API key not configured. Open YouTube Digest Settings.",
+        message: `${provider.name} API key not configured. Open YouTube Digest Settings.`,
       };
     }
 
@@ -971,13 +963,15 @@ async function handleAnalyzeTranscript(
       promptVariables,
     );
 
-    debugLog("[YouTube Digest] Requesting video analysis", settings.aiModel);
+    debugLog(
+      "[YouTube Digest] Requesting video analysis",
+      provider.name,
+      settings.aiModel,
+    );
     const { text: responseText } = await requestAiCompletion({
+      system: systemPrompt,
       maxTokens: 8192,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
+      messages: [{ role: "user", content: userPrompt }],
     });
 
     // Parse the JSON, tolerating trailing commas / stray prose
@@ -993,23 +987,10 @@ async function handleAnalyzeTranscript(
     };
   } catch (error) {
     console.error("Analysis error:", error);
-    if (error.status === 401) {
-      return {
-        success: false,
-        error: "INVALID_AI_KEY",
-        message: "Kimi Code rejected the API key.",
-      };
-    }
-    if (error.status === 429) {
-      return {
-        success: false,
-        error: "RATE_LIMITED",
-        message: "Kimi Code rate-limited this request. Try again shortly.",
-      };
-    }
     return {
       success: false,
       error: error.message || "Failed to analyze transcript",
+      code: error.code || "AI_REQUEST_FAILED",
     };
   }
 }
@@ -1018,7 +999,7 @@ async function handleAnalyzeTranscript(
  * Validates all timestamps in the analysis and fixes any that exceed video duration.
  * This is a safety net to prevent hallucinated timestamps from reaching the UI.
  *
- * @param {Object} analysis - The parsed analysis from Kimi Code
+ * @param {Object} analysis - The parsed analysis from the selected provider
  * @param {number} maxSeconds - Maximum valid timestamp in seconds
  * @returns {Object} - Analysis with validated timestamps
  */
@@ -1112,7 +1093,7 @@ async function handleGetVideoInfo(tabId) {
 // ============================================================
 
 /**
- * Explains selected text using Kimi Code.
+ * Explains selected text using the selected AI provider.
  * Provides context, definitions, and clarification for complex terms.
  *
  * @param {string} selectedText - The text the user selected
@@ -1260,7 +1241,7 @@ async function handleSaveNote(
       }
     }
 
-    // Clean up the text with Kimi Code.
+    // Clean up the text with the selected AI provider.
     const cleanedText = await cleanupNoteText(
       matchedLine.text,
       beforeLine,
@@ -1309,7 +1290,7 @@ async function handleSaveNote(
 }
 
 /**
- * Cleans up transcript lines using Kimi Code.
+ * Cleans up transcript lines using the selected AI provider.
  * Takes the target line plus buffer sentences (1 before, 1 after).
  * Uses JSON output to prevent any preambles from appearing.
  */
@@ -1321,7 +1302,7 @@ async function cleanupNoteText(
   videoTitle,
 ) {
   const settings = await getSettings();
-  if (!settings.aiApiKey) {
+  if (!YTD_SETTINGS.getActiveCredential(settings)) {
     return [beforeText, targetText, afterText].filter(Boolean).join(" ");
   }
 
@@ -1345,11 +1326,9 @@ async function cleanupNoteText(
       variables,
     );
     const { text: resultText } = await requestAiCompletion({
+      system: systemPrompt,
       maxTokens: 512,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
+      messages: [{ role: "user", content: userPrompt }],
     });
 
     let result = resultText.trim() || targetText;
@@ -1443,11 +1422,12 @@ async function handleExplainSelection(
 ) {
   try {
     const settings = await getSettings();
-    if (!settings.aiApiKey) {
+    const provider = YTD_SETTINGS.getActiveProvider(settings);
+    if (!YTD_SETTINGS.getActiveCredential(settings)) {
       return {
         success: false,
         error: "NO_AI_KEY",
-        message: "Kimi Code API key not configured.",
+        message: `${provider.name} API key not configured.`,
       };
     }
 
@@ -1469,11 +1449,9 @@ async function handleExplainSelection(
 
     debugLog("[YouTube Digest] Requesting selection explanation");
     const { text: explanation } = await requestAiCompletion({
+      system: systemPrompt,
       maxTokens: 1024,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
+      messages: [{ role: "user", content: userPrompt }],
     });
 
     return {
@@ -1586,7 +1564,7 @@ function normalizeTranslatedSegmentBatch(parsed, sourceSegments) {
 }
 
 /**
- * Translates content using Kimi Code.
+ * Translates content using the selected AI provider.
  * @param {Object} content - JSON object containing semantic transcript segments
  * @param {string} contentType - 'transcriptBatch' or 'interfaceBatch'
  * @param {string} targetLanguage - 'zh' for Simplified Chinese
@@ -1614,8 +1592,13 @@ async function handleTranslateContent(
     }
 
     const settings = await getSettings();
-    if (!settings.aiApiKey) {
-      return { success: false, error: "Kimi Code API key not configured" };
+    const provider = YTD_SETTINGS.getActiveProvider(settings);
+    if (!YTD_SETTINGS.getActiveCredential(settings)) {
+      return {
+        success: false,
+        error: `${provider.name} API key not configured`,
+        code: "NO_AI_KEY",
+      };
     }
 
     const sourceSegments = validateTranscriptBatchRequest(content);
@@ -1662,7 +1645,7 @@ async function handleTranslateContent(
 }
 
 /**
- * Makes a single Kimi Code call for translation.
+ * Makes a single selected-provider call for translation.
  * Uses temperature 0.3 for consistent, predictable translations.
  *
  * @param {string} systemPrompt - The system-level instructions
@@ -1676,23 +1659,14 @@ async function callAiTranslation(
 ) {
   try {
     const { text } = await requestAiCompletion({
+      system: systemPrompt,
       temperature,
       maxTokens,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
+      messages: [{ role: "user", content: userContent }],
     });
 
     return { success: true, text };
   } catch (error) {
-    if (error.status === 429) {
-      return {
-        success: false,
-        error: "Rate limited — try again in a moment",
-        code: "RATE_LIMITED",
-      };
-    }
     return { success: false, error: error.message, code: error.code };
   }
 }
