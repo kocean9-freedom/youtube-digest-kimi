@@ -66,6 +66,9 @@ test("provider credentials remain isolated when the active provider changes", ()
   assert.equal(settings.getActiveProfile(normalized).model, "openai/gpt-5");
   assert.equal(normalized.providers["kimi-code"].apiKey, "kimi-key");
   assert.equal(normalized.providers.anthropic.apiKey, "claude-key");
+  assert.equal(Object.hasOwn(normalized, "aiApiKey"), false);
+  assert.equal(Object.hasOwn(normalized, "aiBaseUrl"), false);
+  assert.equal(Object.hasOwn(normalized, "aiModel"), false);
 
   const switched = settings.normalize({
     ...normalized,
@@ -73,6 +76,28 @@ test("provider credentials remain isolated when the active provider changes", ()
   });
   assert.equal(settings.getActiveCredential(switched), "claude-key");
   assert.equal(switched.providers.openrouter.apiKey, "router-key");
+});
+
+test("an invalid inactive custom endpoint cannot break the active provider", () => {
+  const normalized = settings.normalize({
+    aiConfigVersion: 2,
+    activeProvider: "kimi-code",
+    providers: {
+      "kimi-code": { apiKey: "kimi-key" },
+      custom: {
+        apiKey: "custom-key",
+        model: "custom-model",
+        baseUrl: "http://unsafe.example/v1",
+      },
+    },
+  });
+
+  assert.equal(normalized.activeProvider, "kimi-code");
+  assert.equal(settings.getActiveCredential(normalized), "kimi-key");
+  assert.equal(
+    normalized.providers.custom.baseUrl,
+    "http://unsafe.example/v1",
+  );
 });
 
 test("unknown providers fall back to Kimi without importing unknown settings", () => {

@@ -15,10 +15,15 @@ test("manifest uses minimized install-time permissions", () => {
   assert.equal(packageJson.version, manifest.version);
   assert.equal(manifest.options_ui.page, "options.html");
   assert.ok(!manifest.permissions.includes("activeTab"));
+  assert.ok(!manifest.permissions.includes("permissions"));
   assert.ok(manifest.host_permissions.includes("https://api.kimi.com/*"));
   assert.ok(!manifest.host_permissions.includes("https://api.deepseek.com/*"));
-  assert.equal(Object.hasOwn(manifest, "optional_host_permissions"), false);
-  assert.equal(manifest.version, "1.2.0");
+  assert.deepEqual(manifest.optional_host_permissions, [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+  ]);
+  assert.equal(manifest.version, "1.3.0");
 });
 
 test("release copy documents current scope without em dashes", () => {
@@ -35,6 +40,7 @@ test("release copy documents current scope without em dashes", () => {
   assert.equal(manifest.name, "YouTube Digest");
   assert.equal(packageJson.name, "youtube-digest");
   assert.match(read("scripts/package-extension.sh"), /youtube-digest-v\$version\.zip/);
+  assert.match(read("scripts/check-release.sh"), /"ai-providers\.js"/);
   assert.doesNotMatch(
     [readme, chineseReadme, read("PRIVACY.md"), read("SECURITY.md")].join("\n"),
     /\bYT Digest\b/,
@@ -117,51 +123,19 @@ test("release copy documents current scope without em dashes", () => {
   const optionsScript = read("options.js");
   assert.match(optionsPage, /dash\.supadata\.ai\/auth\/sign-up/i);
   assert.match(optionsPage, /kimi\.com\/code\/console/i);
-  assert.doesNotMatch(optionsPage, /<select\b/i);
-  assert.doesNotMatch(optionsPage, /id="(?:provider|aiBaseUrl|aiModel)"/);
-  const detailsTag = optionsPage.match(
-    /<details\b[^>]*class="card customization-card"[^>]*>/,
-  );
-  assert.ok(detailsTag, "Expected a native Local remix details disclosure");
-  assert.doesNotMatch(detailsTag[0], /\sopen(?:\s|=|>)/i);
-  assert.match(
-    optionsPage,
-    /<summary class="customization-summary">[\s\S]*Want to use another AI model\?[\s\S]*Edit and copy a safe prompt for your coding agent[\s\S]*<\/summary>/,
-  );
-  assert.match(
-    optionsPage,
-    /class="customization-steps"[\s\S]*Open the extracted YouTube Digest project folder in your coding[\s\S]*Replace \[PROVIDER\] and \[MODEL\][\s\S]*Never include API keys[\s\S]*<\/ol>/,
-  );
-  assert.match(
-    optionsPage,
-    /class="prompt-reminder"[\s\S]*Before copying, replace \[PROVIDER\] and \[MODEL\]/,
-  );
-  assert.doesNotMatch(optionsPage, /~\/Documents\/youtube-digest/);
-  assert.doesNotMatch(optionsPage, /%USERPROFILE%\\Documents\\youtube-digest/);
-  assert.match(optionsPage, /id="copyCustomizationPromptBtn"/);
-  assert.match(optionsStyles, /\.customization-summary:hover\s*\{/);
-  assert.match(optionsStyles, /\.customization-summary:focus-visible\s*\{/);
+  assert.match(optionsPage, /role="radiogroup"/);
+  assert.match(optionsPage, /value="kimi"/);
+  assert.match(optionsPage, /value="openrouter"/);
+  assert.match(optionsPage, /value="advanced"/);
+  assert.match(optionsPage, /id="advancedProvider"/);
+  assert.match(optionsPage, /id="openrouterModelSearch"/);
+  assert.match(optionsPage, /id="advancedBaseUrl"/);
+  assert.match(optionsPage, /id="testConnectionBtn"/);
+  assert.match(optionsPage, /id="deleteCurrentAiKeyBtn"/);
   assert.match(optionsStyles, /\.data-card\s*\{[^}]*margin-top:\s*36px;/);
-  assert.match(optionsScript, /clipboard\.writeText/);
-  assert.match(optionsScript, /Edited prompt copied\./);
+  assert.match(optionsScript, /OPENROUTER_MODELS_CACHE_KEY/);
+  assert.match(optionsScript, /requestProviderPermission/);
   assert.match(optionsScript, /migration\.migrated[\s\S]*storage\.set/);
-
-  const customizationPrompt = `Customize this local YouTube Digest workspace to use [PROVIDER] with [MODEL]. Work only in the current workspace. Before editing, verify that it contains manifest.json and that the manifest name is YouTube Digest. If verification fails, stop and ask me to open the extracted YouTube Digest project folder in my coding agent. Do not search other folders, edit a guessed copy, assume an installation path, or claim Chrome can reveal the absolute OS source path. Update the provider's API endpoint, request format, and minimum Chrome host permissions. Preserve bring-your-own-key and local Chrome storage. Never put API keys in source code, commits, logs, screenshots, this prompt, or chat; after the code is ready, tell me where to enter the key myself. Keep provider-specific request fields and retry behavior isolated so one provider does not affect another. Update README.md, README.zh-CN.md, PRIVACY.md, SECURITY.md, and tests. Run npm test, npm run check, and npm run package. Then explain how to reload the unpacked extension and test it on a real YouTube video.`;
-  assert.ok(optionsPage.includes(`>${customizationPrompt}</textarea>`));
-  assert.doesNotMatch(customizationPrompt, /Documents|USERPROFILE/);
-
-  assert.match(readme, /^## Remix it with your coding agent$/m);
-  assert.match(readme, /more translation languages/i);
-  assert.match(readme, /customized summary templates/i);
-  assert.match(readme, /vocabulary notebook/i);
-  assert.match(
-    readme,
-    /first open the exact YouTube Digest project folder that Chrome loaded through \*\*Load unpacked\*\* in your coding agent/,
-  );
-  assert.match(
-    chineseReadme,
-    /先在编程 Agent 中打开 Chrome 通过“加载已解压的扩展程序”使用的那个准确的 YouTube Digest 项目文件夹/,
-  );
 
   const publishedDocs = [
     readme,
@@ -169,13 +143,15 @@ test("release copy documents current scope without em dashes", () => {
     read("PRIVACY.md"),
     read("SECURITY.md"),
   ].join("\n");
-  assert.doesNotMatch(publishedDocs, /custom OpenAI-compatible/i);
-  assert.doesNotMatch(publishedDocs, /optional custom-origin/i);
-  assert.doesNotMatch(publishedDocs, /chosen AI provider/i);
-  assert.doesNotMatch(publishedDocs, /configure a different OpenAI-compatible/i);
-  assert.match(readme, /published version supports Kimi K2\.7 Code as its only AI provider/i);
-  assert.match(chineseReadme, /发布版本只支持 Kimi K2\.7 Code/);
-  assert.doesNotMatch(publishedDocs, /DeepSeek/i);
+  assert.match(readme, /OpenRouter simple mode/i);
+  assert.match(readme, /official \/ custom advanced mode/i);
+  assert.match(chineseReadme, /OpenRouter 简易模式/);
+  assert.match(chineseReadme, /官方 \/ 自定义高级模式/);
+  assert.match(publishedDocs, /chosen AI provider/i);
+  assert.match(readme, /zarazhangrui\/youtube-digest/i);
+  assert.match(chineseReadme, /zarazhangrui\/youtube-digest/i);
+  assert.match(readme, /derived from the original project/i);
+  assert.match(chineseReadme, /基于原项目衍生/);
 });
 
 test("product UI contains no emoji or emoji-like pictographs", () => {
@@ -273,7 +249,6 @@ test("runtime has no source-file credential dependency or retired model", () => 
   assert.doesNotMatch(runtime, /\bCONFIG\./);
   assert.doesNotMatch(runtime, /importScripts\(["']config\.js/);
   assert.doesNotMatch(runtime, /\bdeepseek-chat\b/);
-  assert.doesNotMatch(runtime, /deepseek-v4-flash/);
   assert.match(runtime, /kimi-for-coding/);
 });
 

@@ -122,12 +122,14 @@ label {
 
 input,
 textarea,
+select,
 button {
   font: inherit;
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   padding: 11px 12px;
   border: 1px solid var(--border);
@@ -137,7 +139,8 @@ textarea {
 }
 
 input:focus,
-textarea:focus {
+textarea:focus,
+select:focus {
   border-color: var(--accent);
   outline: 3px solid rgba(200, 103, 79, 0.14);
 }
@@ -348,6 +351,98 @@ button.danger {
   font-size: 13px;
 }
 
+.section-heading,
+.field-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.section-heading h2,
+.section-help {
+  margin-bottom: 0;
+}
+
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 20px 0;
+}
+
+.mode-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-content: start;
+  gap: 3px 9px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.mode-card:has(input:checked) {
+  border-color: var(--accent);
+  background: #fff7f3;
+  box-shadow: 0 0 0 2px rgba(200, 103, 79, 0.1);
+}
+
+.mode-card input {
+  width: auto;
+  margin: 4px 0 0;
+}
+
+.mode-title {
+  font-weight: 800;
+}
+
+.mode-copy {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.provider-panel {
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid #ecd8ce;
+  border-radius: 14px;
+  background: #fdfaf7;
+}
+
+.provider-panel[hidden],
+#advancedBaseUrlGroup[hidden] {
+  display: none;
+}
+
+.field-row > div {
+  flex: 1 1 auto;
+}
+
+.field-row button {
+  flex: 0 0 auto;
+  margin-bottom: 1px;
+}
+
+.provider-actions {
+  margin-top: 18px;
+}
+
+.danger-secondary {
+  color: var(--danger);
+}
+
+.permission-origin {
+  display: block;
+  margin-top: 7px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
 .data-card {
   margin-top: 36px;
 }
@@ -374,6 +469,16 @@ footer {
   .language-switch .language-option {
     min-width: 56px;
     padding-inline: 8px;
+  }
+
+  .mode-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .field-row,
+  .section-heading {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .customization-card {

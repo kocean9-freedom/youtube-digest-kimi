@@ -38,6 +38,8 @@ var YTD_SETTINGS = (() => {
       protocol: "openai-compatible",
       baseUrl: "https://api.openai.com/v1",
       defaultModel: "gpt-5",
+      maxTokensField: "max_completion_tokens",
+      supportsTemperature: false,
       editableBaseUrl: false,
       editableModel: true,
       docsUrl: "https://platform.openai.com/docs/api-reference",
@@ -211,7 +213,10 @@ var YTD_SETTINGS = (() => {
     };
     if (provider.editableBaseUrl) {
       const candidate = trim(input?.baseUrl) || provider.baseUrl;
-      profile.baseUrl = candidate ? validateCustomBaseUrl(candidate) : "";
+      // Preserve each inactive provider independently. Validate only when its
+      // endpoint is selected for permission or request construction, so one
+      // stale custom URL cannot disable every other provider.
+      profile.baseUrl = candidate;
     }
     return profile;
   }
@@ -242,23 +247,11 @@ var YTD_SETTINGS = (() => {
     const activeProvider = Object.hasOwn(PROVIDERS, requestedProvider)
       ? requestedProvider
       : KIMI_PROVIDER_ID;
-    const activeDefinition = PROVIDERS[activeProvider];
-    const activeProfile = profiles[activeProvider];
-    const activeBaseUrl = activeDefinition.editableBaseUrl
-      ? activeProfile.baseUrl
-      : activeDefinition.baseUrl;
-
     return {
       aiConfigVersion: CONFIG_VERSION,
       activeProvider,
       providers: profiles,
       supadataApiKey: trim(input.supadataApiKey),
-      // Derived compatibility fields keep existing callers functional while
-      // they migrate to provider-aware helpers.
-      provider: activeProvider,
-      aiApiKey: activeProfile.apiKey,
-      aiBaseUrl: activeBaseUrl,
-      aiModel: activeProfile.model,
     };
   }
 

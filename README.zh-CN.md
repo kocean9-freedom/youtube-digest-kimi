@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+> **衍生项目说明：** 本仓库基于 Zara Zhang 的原项目 [zarazhangrui/youtube-digest](https://github.com/zarazhangrui/youtube-digest) 继续开发，保留原 MIT 版权与许可声明，不代表原作者发布的官方上游版本。
+
 把每个 YouTube 视频变成一份可以深入学习的资料。YouTube Digest 把字幕、双语翻译、AI 概览、内容讲解和时间戳笔记放进同一个 Chrome 侧边栏，让你可以持续学习视频中的知识和语言，同时不丢失原视频上下文。
 
 - 把零碎字幕变成清晰、可搜索的学习资料。
@@ -17,24 +19,24 @@ YouTube Digest 是一个需要自行提供 API Key 的开源项目，通过 GitH
 
 ![YouTube Digest 双语演示](YouTube%20Digest%20demo%20bilingual.png)
 
-## v1.2.0 更新
+## v1.3.0 更新
 
-- 搜索字幕中的单词或短语，并依次查看所有匹配位置。
-- 在 Transcript、Overview 和 Notes 中共用 Original、中文和双语设置。新视频默认保持 Original，不会自动消耗翻译 token。
-- 只翻译当前可见的 Overview 和 Notes 内容，并通过小批次渐进显示和缓存结果。
-- 选中字幕后，可以直接讲解内容或保存带时间戳的笔记。
-- 页面跳转后保留字幕阅读位置，并在离开 YouTube 视频页面时自动关闭侧边栏。
+- 默认保留 Kimi Coding Plan 和固定的 `kimi-for-coding` 体验。
+- 增加 OpenRouter 简易模式，可搜索已缓存的模型目录，也可手动输入模型 ID。
+- 增加官方 / 自定义高级模式，支持 OpenAI 兼容、Anthropic Messages 和 Gemini generateContent。
+- 每个提供商的 API Key 和设置都在 Chrome 本地分开保存。
+- Chrome 只会在你选择非默认提供商时，请求该提供商的准确来源权限。
 
 ## 让你的编程 Agent 帮你安装
 
 你不需要看懂代码，也不需要会使用命令行。把下面这段话发送给你的编程 Agent：
 
-> 请把这个项目下载或克隆到我选择的长期保留文件夹，告诉我准确的完整路径，并让 Chrome“加载已解压的扩展程序”使用同一个文件夹。如果我在第一次安装时需要位置建议，可以推荐 macOS 或 Linux 上的 `~/Documents/youtube-digest`，或 Windows 上的 `%USERPROFILE%\Documents\youtube-digest`，但不要假设我一定使用这些路径。请用简单易懂的语言一步一步指导我完成安装和配置。https://github.com/zarazhangrui/youtube-digest
+> 请把这个项目下载或克隆到我选择的长期保留文件夹，告诉我准确的完整路径，并让 Chrome“加载已解压的扩展程序”使用同一个文件夹。如果我在第一次安装时需要位置建议，可以推荐 macOS 或 Linux 上的 `~/Documents/youtube-digest`，或 Windows 上的 `%USERPROFILE%\Documents\youtube-digest`，但不要假设我一定使用这些路径。请用简单易懂的语言一步一步指导我完成安装和配置。https://github.com/kocean9-freedom/youtube-digest-kimi
 
 你的 Agent 应该帮你：
 
 1. 先询问你想把项目长期保存在哪里，再下载或克隆到那里，并告诉你准确的完整路径。如果你需要建议，可以推荐 macOS 或 Linux 上的 `~/Documents/youtube-digest`，或 Windows 上的 `%USERPROFILE%\Documents\youtube-digest`。
-2. 打开下方 Supadata 和 Kimi Code 官方页面，指导你创建自己的账号。
+2. 打开下方 Supadata 和你选择的 AI 提供商官方页面，指导你创建自己的账号。
 3. 指导你在 Chrome 中通过“加载已解压的扩展程序”选择你刚才确定的那个准确项目文件夹。
 4. 告诉你应该在扩展的“设置”页面哪个位置填写 API Key。
 5. 打开一个带字幕的 YouTube 视频，确认字幕和翻译功能可以使用。
@@ -47,7 +49,7 @@ YouTube Digest 是一个需要自行提供 API Key 的开源项目，通过 GitH
 
 如果你想自己操作：
 
-1. 打开 [github.com/zarazhangrui/youtube-digest](https://github.com/zarazhangrui/youtube-digest)。
+1. 打开 [github.com/kocean9-freedom/youtube-digest-kimi](https://github.com/kocean9-freedom/youtube-digest-kimi)。
 2. 点击 **Code**，再选择 **Download ZIP**。
 3. 选择一个长期保留的文件夹，并把项目解压到这里。可选建议是 macOS 或 Linux 上的 `~/Documents/youtube-digest`，或 Windows 上的 `%USERPROFILE%\Documents\youtube-digest`。你也可以使用其他文件夹。
 4. 在 Chrome 地址栏打开 `chrome://extensions`。
@@ -63,7 +65,7 @@ YouTube Digest 是一个需要自行提供 API Key 的开源项目，通过 GitH
 YouTube Digest 需要你在自己的服务账号中准备两个 Key：
 
 1. **Supadata API Key**，用于获取 YouTube 字幕。
-2. 来自你的 Kimi Coding Plan 的 **Kimi Code API Key**，用于生成概览、讲解内容、翻译和自动润色笔记。
+2. 一个 **AI 提供商 API Key**，用于生成概览、讲解内容、翻译和自动润色笔记。Kimi Coding Plan 仍是默认选项。
 
 ### 获取 Supadata API Key
 
@@ -87,7 +89,11 @@ YouTube Digest 需要你在自己的服务账号中准备两个 Key：
 
 在侧边栏中打开 **Settings**。你也可以在 `chrome://extensions` 的 YouTube Digest 卡片中打开扩展选项。Key 只能粘贴到这些设置输入框中。不要把 Key 发送到 AI 对话、项目文件、截图或公开消息中。
 
-发布版本只支持 Kimi K2.7 Code：
+### 选择 AI 模式
+
+设置页提供三种相互独立的模式：
+
+- **Kimi Coding Plan**，默认模式。它使用以下固定配置：
 
 ```text
 Base URL: https://api.kimi.com/coding/v1
@@ -95,7 +101,12 @@ Endpoint: https://api.kimi.com/coding/v1/chat/completions
 Model: kimi-for-coding
 ```
 
-Kimi K2.7 Code 使用 **Thinking ON**。YouTube Digest 不会发送之前服务商的思考控制字段，因此保持 Kimi Coding Plan 的默认开启状态。设置中的接口地址和模型固定，只需要填写 Kimi Code API Key。如果想使用其他服务或模型，请在设置中复制安全的自定义 prompt，让编程 Agent 修改你自己的本地副本。不要把任何 API Key 放进 prompt 或对话。
+- **OpenRouter 简易模式**。填入 OpenRouter Key 后，可搜索模型目录或手动输入准确的模型 ID。模型列表会在本地缓存 24 小时。OpenRouter 可能把内容路由到你选择模型的托管方。
+- **官方 / 自定义高级模式**。可选 OpenAI、DeepSeek、Kimi 开放平台、Qwen、GLM、SiliconFlow、Anthropic、Gemini 或自定义 OpenAI 兼容接口。模型会变动，请以服务商当前文档中的准确模型 ID 为准。Qwen 和自定义接口可编辑 Base URL。
+
+Kimi K2.7 Code 使用 **Thinking ON**。YouTube Digest 不会向 Kimi 发送关闭思考的字段。Anthropic 和 Gemini 使用各自的请求格式；DeepSeek 专用行为与其他提供商隔离。每个 AI 请求或翻译批次只尝试一次，不会自动重试或切换提供商。完整字幕翻译可能分成多个批次，因此可能产生多次付费请求。
+
+保存或测试非默认提供商时，Chrome 会请求该提供商的准确来源权限。Manifest 声明较广的可选 HTTPS 能力只是为了允许自定义端点；扩展不会自动获得所有网站权限。自定义端点必须使用 HTTPS，本地开发的 `http://localhost` 和 `http://127.0.0.1` 除外。
 
 Kimi Coding Plan 主要面向编程工具。这个个人改造版使用它的 OpenAI 兼容接口实现视频学习功能，使用前请确认当前 Kimi 条款和会员规则允许这种用法。
 
@@ -118,7 +129,7 @@ API Key 和设置保存在你设备上的 Chrome 扩展本地存储中。发布�
 - 原文、简体中文和双语对照字幕。
 - AI 概览、选中文本讲解、翻译和自动润色笔记。
 - 本地笔记，以及最近字幕、概览和翻译的本地缓存。
-- 发布版本的所有 AI 功能都通过 Kimi Coding Plan 使用 Kimi K2.7 Code。其他服务需要修改本地代码，不属于发布版本的支持范围。
+- 默认使用 Kimi Coding Plan，同时支持 OpenRouter 简易模式，以及基于 OpenAI 兼容、Anthropic Messages 或 Gemini generateContent 协议的官方和自定义高级提供商。
 
 Shorts、直播、私密视频、受访问限制的视频，以及没有原生字幕的视频可能无法使用。目前没有测试 Firefox、Safari、移动浏览器或其他 Chromium 浏览器。
 
@@ -154,18 +165,16 @@ YouTube Digest 使用原生 HTML、CSS 和 JavaScript，没有构建步骤，很
 
 请让 Agent 保留用户自带 API Key 的模式，不要把秘密写入源代码，并运行下方检查。分享自己的版本前，也要在真实视频上测试。
 
-如果想使用其他 AI 服务或模型，请先在编程 Agent 中打开 Chrome 通过“加载已解压的扩展程序”使用的那个准确的 YouTube Digest 项目文件夹。然后打开 YouTube Digest 设置并点击 **Copy customization prompt**。发送前替换 `[PROVIDER]` 和 `[MODEL]`，但不要加入任何 API Key。Agent 完成本地代码修改后，请你自己在它指出的设置位置填写 Key。
-
 ## 隐私和数据流向
 
 YouTube Digest 会直接从扩展向服务商发送请求：
 
 1. 把标准化的 YouTube 视频地址发送给 Supadata，用于获取原生字幕。
-2. 当你使用 AI 功能时，把字幕和相关视频信息发送给 Kimi Code。
+2. 当你使用 AI 功能时，把字幕和相关视频信息发送给你当前选择的 AI 提供商。
 3. 翻译或讲解等功能只发送当前需要的内容，例如选中的文本和上下文，或少量字幕分段。
 4. API Key、设置、笔记和最近缓存保存在 Chrome 本地。
 
-YouTube Digest 没有账号系统、广告、分析统计或行为追踪。Supadata 和 Kimi 仍会按照各自的条款和隐私政策处理数据。详情请查看 [PRIVACY.md](PRIVACY.md)。
+YouTube Digest 没有账号系统、广告、分析统计或行为追踪。Supadata、你选择的 AI 提供商，以及选中 OpenRouter 时的 OpenRouter，仍会按照各自的条款和隐私政策处理数据。详情请查看 [PRIVACY.md](PRIVACY.md)。
 
 ## 常见问题
 
@@ -186,9 +195,9 @@ YouTube Digest 没有账号系统、广告、分析统计或行为追踪。Supad
 
 ### YouTube Digest 提示需要设置
 
-- 打开 **Settings**，保存 Supadata Key 和 Kimi Code Key。
-- 发布版本固定使用 Kimi K2.7 Code，没有需要填写的 Base URL 或 Model 字段。
-- 从其他 AI 服务升级后，请填写 Kimi Code Key。旧 AI Key 会被安全清除，避免发送给错误的服务。
+- 打开 **Settings**，保存 Supadata Key，选择 AI 模式，并填写该提供商的 Key。
+- 打开视频前先点击 **Test connection**。Chrome 可能会先请求当前提供商的主机权限。
+- 每个提供商的 Key 独立保存，切换时不会把一个提供商的 Key 复制到另一个配置中。
 
 ### 找不到字幕
 
@@ -200,10 +209,10 @@ YouTube Digest 不会自动改用 AI 生成字幕。
 
 ### AI 请求失败
 
-- `401` 或 `403` 通常表示 Kimi Code Key 或会员权限有问题。
-- `429` 通常表示达到了 Kimi Code 限速或会员额度上限。
-- 确认 Key 来自上方链接的 Kimi Code 控制台，并且当前会员可以使用 `kimi-for-coding`。
-- 如果你把本地副本改成了其他模型，请再次使用设置中的自定义 prompt，让编程 Agent 检查本地实现。
+- `401` 或 `403` 通常表示当前提供商的 Key 或账号权限有问题。
+- `429` 通常表示达到了当前提供商的限速或额度上限。
+- 确认模型 ID、可编辑时的 Base URL，以及设置页显示的 Chrome 权限。
+- 使用 OpenRouter 时，请确认所选模型对你的账号和路由偏好可用。
 
 不要在对话、截图或日志中分享 API Key、私密字幕或个人笔记。
 
@@ -220,5 +229,7 @@ npm run package
 Agent 还应该在 Chrome 中重新加载扩展，并测试多个真实 YouTube 视频。自动检查通过，不代表真实服务请求和 YouTube 交互一定正常。
 
 ## 开源许可
+
+本仓库基于原项目衍生：Zara Zhang 的 [zarazhangrui/youtube-digest](https://github.com/zarazhangrui/youtube-digest)。本仓库保留原 MIT 版权和许可声明。多提供商改动是 MIT 许可下正常的衍生创作，不代表原作者发布的官方上游版本。
 
 MIT，详见 [LICENSE](LICENSE)。

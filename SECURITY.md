@@ -25,12 +25,14 @@ There is no guaranteed response time or bug-bounty program. Please allow a reaso
 Examples include:
 
 - API keys or private content included in source, logs, screenshots, or release ZIPs;
-- requests to network origins outside the documented YouTube, Supadata, and Kimi hosts;
+- requests to network origins outside YouTube, Supadata, Kimi, or the exact optional AI provider origin approved by the user;
 - script or HTML injection through transcript, metadata, service errors, or model output;
 - access to browsing data outside the documented YouTube scope;
 - unintended transmission of notes, transcripts, or credentials;
 - a dependency or release-workflow compromise; and
-- bypasses of local data deletion or Kimi Code configuration controls.
+- provider credential crossover, provider-specific request fields leaking into another protocol, or unintended automatic paid retries;
+- bypasses of exact-origin permission checks; and
+- bypasses of local data deletion or AI provider configuration controls.
 
 ## User security guidance
 
@@ -38,6 +40,9 @@ Examples include:
 - Review changes and the packaged file list before loading an update.
 - Use dedicated, scoped API keys where possible and set provider spending limits.
 - Do not reuse keys from production systems.
+- Verify the exact origin in Chrome's optional permission prompt before approving a direct or custom provider.
+- Use HTTPS for custom endpoints. Allow plain HTTP only for `localhost` or `127.0.0.1` during local development.
+- Treat OpenRouter as an intermediary that may route content to the selected model host; review both services' policies.
 - Revoke keys immediately if a device, browser profile, ZIP, log, or screenshot exposes them.
 - Remember that Chrome local extension storage is not an encrypted password vault.
 

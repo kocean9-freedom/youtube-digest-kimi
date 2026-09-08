@@ -121,143 +121,33 @@ test("language controls expose a labelled group and one pressed button", () => {
   assert.equal(buttons[1].attributes["aria-pressed"], "true");
 });
 
-test("customization guidance is concise and has a visible placeholder reminder", () => {
+test("provider modes are bilingual and explain credential isolation", () => {
   const html = read("options.html");
-  const steps = html.match(
-    /<ol class="customization-steps">([\s\S]*?)<\/ol>/,
-  );
 
-  assert.ok(steps, "Expected a numbered customization guide");
-  assert.equal((steps[1].match(/<li\b/g) || []).length, 3);
-  assert.match(html, /class="prompt-reminder"/);
-  assert.match(html, /role="note"/);
-  assert.equal(
-    options.translate("zh-CN", "customizationReminder"),
-    "复制前，请先把 [PROVIDER] 和 [MODEL] 替换成你想使用的服务和模型。",
+  assert.match(html, /role="radiogroup"/);
+  assert.match(html, /value="kimi"/);
+  assert.match(html, /value="openrouter"/);
+  assert.match(html, /value="advanced"/);
+  assert.match(
+    options.translate("en", "providerChoiceHelp"),
+    /Saved keys stay separate/,
   );
-  assert.equal(
-    options.translate("en", "customizationStepFolder"),
-    "Open the extracted YouTube Digest project folder in your coding agent.",
+  assert.match(
+    options.translate("zh-CN", "providerChoiceHelp"),
+    /每个服务已保存的密钥相互独立/,
   );
-  assert.equal(
-    options.translate("zh-CN", "customizationStepFolder"),
-    "在编程 Agent 中打开 YouTube Digest 解压后的项目文件夹。",
-  );
-  assert.doesNotMatch(html, /~\/Documents\/youtube-digest/);
-  assert.doesNotMatch(html, /%USERPROFILE%\\Documents\\youtube-digest/);
 });
 
-test("customization prompt switches languages and preserves technical values", () => {
+test("provider fields protect keys and expose model controls", () => {
   const html = read("options.html");
-  const englishPrompt = options.translate("en", "customizationPrompt");
-  const chinesePrompt = options.translate("zh-CN", "customizationPrompt");
 
   assert.match(html, /placeholder="Paste your Supadata key"/);
   assert.match(html, /placeholder="Paste your Kimi Code key"/);
   assert.match(html, /https:\/\/dash\.supadata\.ai\/auth\/sign-up/);
   assert.match(html, /https:\/\/www\.kimi\.com\/code\/console/);
-  assert.ok(html.includes(`>${englishPrompt}</textarea>`));
-  assert.match(chinesePrompt, /^请把当前本地 YouTube Digest 工作区改为使用/);
-  assert.notEqual(chinesePrompt, englishPrompt);
-  assert.match(
-    englishPrompt,
-    /Keep provider-specific request fields and retry behavior isolated so one provider does not affect another\./,
-  );
-  assert.match(
-    chinesePrompt,
-    /供应商专用的请求参数和重试逻辑请分别处理，避免一个供应商的规则影响另一个。/,
-  );
-
-  for (const prompt of [englishPrompt, chinesePrompt]) {
-    assert.match(prompt, /\[PROVIDER\]/);
-    assert.match(prompt, /\[MODEL\]/);
-    assert.match(prompt, /manifest\.json/);
-    assert.match(prompt, /README\.md/);
-    assert.match(prompt, /README\.zh-CN\.md/);
-    assert.match(prompt, /PRIVACY\.md/);
-    assert.match(prompt, /SECURITY\.md/);
-    assert.match(prompt, /npm test/);
-    assert.match(prompt, /npm run check/);
-    assert.match(prompt, /npm run package/);
-    assert.doesNotMatch(prompt, /—/);
-  }
-  const textareaTag = html.match(/<textarea id="customizationPrompt"[^>]*>/);
-  assert.ok(textareaTag, "Expected the customization prompt textarea");
-  assert.doesNotMatch(textareaTag[0], /\sreadonly(?:\s|=|>)/);
-  assert.match(
-    textareaTag[0],
-    /aria-describedby="customizationPromptReminder"/,
-  );
-  assert.doesNotMatch(html, /<textarea id="customizationPrompt"[^>]*data-i18n/);
-});
-
-test("language switching preserves edited prompt drafts for the page session", () => {
-  const drafts = options.createPromptDrafts();
-  const chineseDefault = drafts["zh-CN"];
-
-  const chinese = options.switchPromptDraft(
-    drafts,
-    "en",
-    "zh-CN",
-    "Edited English [PROVIDER] [MODEL]",
-  );
-  assert.equal(chinese.prompt, chineseDefault);
-
-  const english = options.switchPromptDraft(
-    drafts,
-    "zh-CN",
-    "en",
-    "已编辑中文 [PROVIDER] [MODEL]",
-  );
-  assert.equal(english.prompt, "Edited English [PROVIDER] [MODEL]");
-
-  const restoredChinese = options.switchPromptDraft(
-    drafts,
-    "en",
-    "zh-CN",
-    english.prompt,
-  );
-  assert.equal(restoredChinese.prompt, "已编辑中文 [PROVIDER] [MODEL]");
-});
-
-test("copy helper writes the current edited textarea value", async () => {
-  const writes = [];
-  const clipboard = {
-    async writeText(value) {
-      writes.push(value);
-    },
-  };
-
-  await options.copyPromptValue(
-    clipboard,
-    "My edited prompt for [PROVIDER] and [MODEL]",
-  );
-
-  assert.deepEqual(writes, ["My edited prompt for [PROVIDER] and [MODEL]"]);
-});
-
-test("localized prompt updates preserve the textarea selection and scroll", () => {
-  const textarea = {
-    value: options.translate("en", "customizationPrompt"),
-    selectionStart: 12,
-    selectionEnd: 48,
-    selectionDirection: "forward",
-    scrollTop: 90,
-    scrollLeft: 7,
-    setSelectionRange(start, end, direction) {
-      this.selectionStart = start;
-      this.selectionEnd = end;
-      this.selectionDirection = direction;
-    },
-  };
-  const chinesePrompt = options.translate("zh-CN", "customizationPrompt");
-
-  options.updateLocalizedPrompt(textarea, chinesePrompt);
-
-  assert.equal(textarea.value, chinesePrompt);
-  assert.equal(textarea.selectionStart, 12);
-  assert.equal(textarea.selectionEnd, 48);
-  assert.equal(textarea.selectionDirection, "forward");
-  assert.equal(textarea.scrollTop, 90);
-  assert.equal(textarea.scrollLeft, 7);
+  assert.match(html, /id="openrouterModelSearch"/);
+  assert.match(html, /id="advancedProvider"/);
+  assert.match(html, /id="advancedBaseUrl"/);
+  assert.match(html, /id="testConnectionBtn"/);
+  assert.equal((html.match(/type="password"/g) || []).length, 4);
 });

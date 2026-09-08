@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+> **Derivative project:** This repository builds on Zara Zhang's original [zarazhangrui/youtube-digest](https://github.com/zarazhangrui/youtube-digest), retains its MIT copyright and license notice, and is not an official upstream release.
+
 Turn every YouTube video into a resource for deep learning. YouTube Digest brings transcripts, bilingual translation, AI overviews, explanations, and timestamped notes into one Chrome side panel, so you can study ideas and language without losing your place.
 
 - Turn captions into a readable, searchable learning resource.
@@ -15,24 +17,24 @@ YouTube Digest is a bring-your-own-key project installed locally from GitHub. It
 
 ![YouTube Digest demo](YouTube%20Digest%20demo.png)
 
-## New in v1.2.0
+## New in v1.3.0
 
-- Search transcript words or phrases and move through every match.
-- Use one Original, Chinese, or bilingual setting across Transcript, Overview, and Notes. New videos stay in Original by default.
-- Translate visible Overview and Notes content progressively in small cached batches.
-- Explain selected transcript text or save it directly as a timestamped note.
-- Keep your transcript position across navigation, with the panel closing automatically outside YouTube video pages.
+- Keep Kimi Coding Plan as the default, fixed `kimi-for-coding` experience.
+- Use OpenRouter simple mode to search a cached model directory or enter a model ID manually.
+- Use official / custom advanced mode for OpenAI-compatible services, Anthropic Messages, and Gemini generateContent.
+- Keep each provider's API key and settings isolated in local Chrome storage.
+- Grant only the selected provider's exact origin when Chrome asks for optional host access.
 
 ## Install with your coding agent
 
 You do not need to understand the code or use the command line. Send this message to your coding agent:
 
-> Download or clone this project into a permanent folder I choose, tell me its exact full path, and use that same folder for Chrome's Load unpacked step. If I need a suggestion during this first installation, offer `~/Documents/youtube-digest` on macOS or Linux, or `%USERPROFILE%\Documents\youtube-digest` on Windows, but do not assume either path. Walk me through installation and setup in simple terms. https://github.com/zarazhangrui/youtube-digest
+> Download or clone this project into a permanent folder I choose, tell me its exact full path, and use that same folder for Chrome's Load unpacked step. If I need a suggestion during this first installation, offer `~/Documents/youtube-digest` on macOS or Linux, or `%USERPROFILE%\Documents\youtube-digest` on Windows, but do not assume either path. Walk me through installation and setup in simple terms. https://github.com/kocean9-freedom/youtube-digest-kimi
 
 Your agent should:
 
 1. Ask where you want to keep the project, download or clone it there, and tell you the exact full path. If you want a suggestion, it can offer `~/Documents/youtube-digest` on macOS or Linux, or `%USERPROFILE%\Documents\youtube-digest` on Windows.
-2. Open the official Supadata and Kimi Code pages below and help you create your own accounts.
+2. Open the official Supadata page and the page for the AI provider you choose, then help you create your own accounts.
 3. Walk you through selecting the exact project folder you chose in Chrome with **Load unpacked**.
 4. Show you where to enter your API keys in the extension's **Settings** page.
 5. Open a YouTube video with captions and confirm the transcript and translation work.
@@ -45,7 +47,7 @@ Never paste an API key into an AI chat, source file, screenshot, or public messa
 
 If you prefer to do it yourself:
 
-1. Open [github.com/zarazhangrui/youtube-digest](https://github.com/zarazhangrui/youtube-digest).
+1. Open [github.com/kocean9-freedom/youtube-digest-kimi](https://github.com/kocean9-freedom/youtube-digest-kimi).
 2. Choose **Code**, then **Download ZIP**.
 3. Choose a permanent folder and unzip the project there. Optional suggestions are `~/Documents/youtube-digest` on macOS or Linux, or `%USERPROFILE%\Documents\youtube-digest` on Windows. You may use a different folder.
 4. In Chrome, open `chrome://extensions`.
@@ -61,7 +63,7 @@ Because this is an unpacked extension, it does not update automatically. After d
 YouTube Digest needs two keys under your own provider accounts:
 
 1. A **Supadata API key** to retrieve YouTube transcripts.
-2. A **Kimi Code API key** from your Kimi Coding Plan for overviews, explanations, translation, and automatic note polishing.
+2. One **AI provider API key** for overviews, explanations, translation, and automatic note polishing. Kimi Coding Plan remains the default.
 
 ### Get a Supadata API key
 
@@ -85,7 +87,11 @@ See the [official Kimi Code documentation](https://www.kimi.com/code/docs/) for 
 
 Open **Settings** from the side panel. You can also open the YouTube Digest **Options** page from its card at `chrome://extensions` or by right-clicking its toolbar icon. Paste keys only into these Settings fields. Never paste a key into an AI chat, repository file, screenshot, or public message.
 
-The published version supports Kimi K2.7 Code as its only AI provider:
+### Choose an AI mode
+
+The Settings page provides three independent modes:
+
+- **Kimi Coding Plan**, the default. It uses this fixed configuration:
 
 ```text
 Base URL: https://api.kimi.com/coding/v1
@@ -93,7 +99,12 @@ Endpoint: https://api.kimi.com/coding/v1/chat/completions
 Model: kimi-for-coding
 ```
 
-Kimi K2.7 Code operates with **Thinking ON**. YouTube Digest does not send the old provider's thinking-control fields, so the Kimi Coding Plan default stays enabled. The endpoint and model are fixed in Settings, so the only AI credential you enter is your Kimi Code API key. To use another provider or model, copy the safe customization prompt in Settings and give it to a coding agent for your local copy. Never add an API key to that prompt or chat.
+- **OpenRouter simple mode**. Enter an OpenRouter key, search its model directory, or type an exact model ID. The model list is cached locally for 24 hours. OpenRouter may route content to the host of the model you select.
+- **Official / custom advanced mode**. Choose OpenAI, DeepSeek, Kimi Open Platform, Qwen, GLM, SiliconFlow, Anthropic, Gemini, or a custom OpenAI-compatible endpoint. Provider model availability changes over time, so enter an exact model ID from that provider's current documentation. Qwen and custom endpoints allow an editable Base URL.
+
+Kimi K2.7 Code operates with **Thinking ON**. YouTube Digest does not send a thinking-disable field for Kimi. Anthropic and Gemini use their own request formats; DeepSeek-only behavior stays isolated from every other provider. Each AI request or translation batch is attempted once, with no automatic retry or provider fallback. A complete transcript translation can require multiple batches and therefore multiple paid requests.
+
+When you save or test a non-default provider, Chrome asks for access to that provider's exact origin. The manifest declares broad optional HTTPS capability only so custom endpoints can work; the extension requests one selected origin at runtime and does not gain blanket access automatically. Custom endpoints must use HTTPS, except `http://localhost` and `http://127.0.0.1` for local development.
 
 Kimi Coding Plan is primarily designed for coding tools. This personal remix uses its OpenAI-compatible endpoint for video-learning features, so confirm that this use fits the current Kimi terms and membership rules before relying on it.
 
@@ -116,7 +127,7 @@ Keys and settings are stored in Chrome's local extension storage on your device.
 - Original, Simplified Chinese, and aligned bilingual transcript views.
 - AI overviews, selected-text explanations, translation, and automatic note polishing.
 - Local notes and a local cache for recent transcript and digest results.
-- Kimi K2.7 Code through Kimi Coding Plan for all published AI features. Other providers require a local code adaptation and are not supported by this published version.
+- Kimi Coding Plan by default, OpenRouter simple mode, and official or custom advanced providers using OpenAI-compatible, Anthropic Messages, or Gemini generateContent protocols.
 
 Shorts, live streams, private or access-restricted videos, and videos without an available native transcript may not work. Firefox, Safari, mobile browsers, and other Chromium browsers are not currently tested or supported.
 
@@ -152,18 +163,16 @@ YouTube Digest uses plain HTML, CSS, and JavaScript with no build step, so it is
 
 Ask your agent to preserve the bring-your-own-key model, keep secrets out of source files, run the checks below, and test the remix on real videos.
 
-If you want another AI provider or model, first open the exact YouTube Digest project folder that Chrome loaded through **Load unpacked** in your coding agent. Then open YouTube Digest Settings and use **Copy customization prompt**. Replace the `[PROVIDER]` and `[MODEL]` placeholders before sending it. Do not include any API key in the prompt or chat. After the agent updates your local copy, enter the key yourself in the Settings field it identifies.
-
 ## Privacy and data flow
 
 YouTube Digest makes provider requests directly from the extension:
 
 1. It sends a canonical YouTube watch URL to Supadata to request the native transcript.
-2. It sends the transcript and relevant video metadata to Kimi Code when you request AI features.
+2. It sends the transcript and relevant video metadata to your chosen AI provider when you request AI features.
 3. Focused features send only the content they need, such as selected text with context or small transcript batches for translation.
 4. It stores keys, settings, notes, and recent cache entries locally in Chrome.
 
-There is no YouTube Digest account system, advertising, analytics, or telemetry. Supadata and Kimi still receive data under their own terms and privacy policies. See [PRIVACY.md](PRIVACY.md) for details.
+There is no YouTube Digest account system, advertising, analytics, or telemetry. Supadata, your chosen AI provider, and OpenRouter when selected still receive data under their own terms and privacy policies. See [PRIVACY.md](PRIVACY.md) for details.
 
 ## Troubleshooting
 
@@ -184,9 +193,9 @@ There is no YouTube Digest account system, advertising, analytics, or telemetry.
 
 ### YouTube Digest asks for setup
 
-- Open **Settings** and save both a Supadata key and a Kimi Code key.
-- This published version uses the fixed Kimi K2.7 Code endpoint and model. There are no Base URL or Model fields to configure.
-- After upgrading from another provider, enter a Kimi Code key. The old AI key is cleared so it cannot be reused with the wrong service.
+- Open **Settings**, save a Supadata key, choose an AI mode, and enter that provider's key.
+- Use **Test connection** before opening a video. Chrome may first ask for the selected provider's host permission.
+- Keys are separate per provider. Switching providers does not copy one provider's key into another profile.
 
 ### No transcript is found
 
@@ -198,10 +207,10 @@ YouTube Digest will not fall back to generated transcription.
 
 ### AI requests fail
 
-- A `401` or `403` usually means the Kimi Code key or membership access is invalid.
-- A `429` usually means a Kimi Code rate or membership quota limit was reached.
-- Confirm the key was created in the Kimi Code Console linked above and that your membership can use `kimi-for-coding`.
-- If you adapted a local copy for another model, use the Settings customization prompt again and ask your coding agent to inspect that local implementation.
+- A `401` or `403` usually means the selected provider's key or account access is invalid.
+- A `429` usually means the selected provider's rate or quota limit was reached.
+- Confirm the model ID, Base URL when editable, and Chrome permission shown in Settings.
+- For OpenRouter, verify that the selected model is available to your account and routing preferences.
 
 Never share API keys, private transcripts, or personal notes in chats, screenshots, or logs.
 
@@ -218,5 +227,7 @@ npm run package
 The agent should also reload the unpacked extension in Chrome and test several real YouTube videos. Automated checks do not prove that live provider requests and YouTube interactions work.
 
 ## License
+
+This repository is derived from the original project, [zarazhangrui/youtube-digest](https://github.com/zarazhangrui/youtube-digest) by Zara Zhang, and retains the original MIT copyright and license notice. The multi-provider changes are a normal MIT-licensed derivative work, not an official upstream release.
 
 MIT. See [LICENSE](LICENSE).

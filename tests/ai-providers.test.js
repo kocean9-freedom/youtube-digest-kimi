@@ -61,6 +61,19 @@ test("custom OpenAI-compatible providers use only their own profile", () => {
   assert.equal(Object.hasOwn(request.body, "temperature"), false);
 });
 
+test("official OpenAI GPT-5 requests use supported token and sampling fields", () => {
+  const adapters = loadAdapters();
+  const request = adapters.buildRequest(
+    settings.PROVIDERS.openai,
+    { apiKey: "openai-key", model: "gpt-5" },
+    baseInput,
+  );
+
+  assert.equal(request.body.max_completion_tokens, 128);
+  assert.equal(Object.hasOwn(request.body, "max_tokens"), false);
+  assert.equal(Object.hasOwn(request.body, "temperature"), false);
+});
+
 test("Anthropic keeps system separate and omits temperature", () => {
   const adapters = loadAdapters();
   const request = adapters.buildRequest(
@@ -163,6 +176,26 @@ test("empty and blocked responses have stable provider-aware errors", () => {
       }),
     (error) => error.code === "AI_BLOCKED" && error.provider === "gemini",
   );
+  assert.throws(
+    () =>
+      adapters.parseResponse(settings.PROVIDERS.gemini, {
+        candidates: [{ finishReason: "SAFETY", content: { parts: [] } }],
+      }),
+    (error) => error.code === "AI_BLOCKED" && error.provider === "gemini",
+  );
+  assert.throws(
+    () =>
+      adapters.parseResponse(settings.PROVIDERS.gemini, {
+        candidates: [
+          {
+            finishReason: "MAX_TOKENS",
+            content: { parts: [{ text: "partial output" }] },
+          },
+        ],
+      }),
+    (error) =>
+      error.code === "AI_RESPONSE_TRUNCATED" && error.provider === "gemini",
+  );
 });
 
 test("HTTP errors normalize authentication, rate limits, and provider failures", () => {
@@ -186,7 +219,7 @@ test("HTTP errors normalize authentication, rate limits, and provider failures",
     message: "Upstream unavailable",
   });
   assert.equal(failed.code, "PROVIDER_HTTP_ERROR");
-  assert.match(failed.message, /Upstream unavailable/);
+  assert.doesNotMatch(failed.message, /Upstream unavailable/);
 });
 
 test("invalid requests fail before any network request can be built", () => {

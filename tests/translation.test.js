@@ -81,6 +81,8 @@ function loadBackgroundHelpers({
   fetchImpl = fetch,
   setTimeoutImpl = () => 0,
   clearTimeoutImpl = () => {},
+  consoleImpl = console,
+  permissions,
   sidePanel = {
     setPanelBehavior() {},
     setOptions: () => Promise.resolve(),
@@ -90,7 +92,7 @@ function loadBackgroundHelpers({
   const runtimeMessageListeners = [];
   const localStorage = { ytd_settings: settings };
   const sandbox = {
-    console,
+    console: consoleImpl,
     URL,
     TextDecoder,
     TextEncoder,
@@ -134,16 +136,17 @@ function loadBackgroundHelpers({
       tabs: { onUpdated: listeners, onActivated: listeners },
     },
   };
+  if (permissions) sandbox.chrome.permissions = permissions;
   sandbox.globalThis = sandbox;
   vm.runInNewContext(read("settings.js"), sandbox);
   vm.runInNewContext(read("ai-providers.js"), sandbox);
   vm.runInNewContext(read("background.js"), sandbox);
   return {
     ...sandbox.__YTD_TRANSLATION_TESTING__,
-    dispatchRuntimeMessage(message) {
+    dispatchRuntimeMessage(message, sender = {}) {
       return new Promise((resolve) => {
         const handled = runtimeMessageListeners.some(
-          (listener) => listener(message, {}, resolve) === true,
+          (listener) => listener(message, sender, resolve) === true,
         );
         if (!handled) resolve(undefined);
       });
@@ -525,10 +528,6 @@ test("the default AI request uses Kimi without provider-only fields", async () =
   assert.equal(Object.hasOwn(kimiRequests[0].body, "response_format"), false);
 
   const backgroundSource = read("background.js");
-  assert.equal(
-    (backgroundSource.match(/await requestAiCompletion\(\{/g) || []).length,
-    4,
-  );
   assert.doesNotMatch(backgroundSource, /disableThinking/);
   for (const callPath of [
     "handleAnalyzeTranscript",
@@ -676,6 +675,213 @@ test("product errors name the selected provider instead of Kimi", async () => {
   assert.equal(limited.code, "RATE_LIMITED");
   assert.match(limited.error, /OpenRouter/);
   assert.equal(requests, 1);
+});
+
+test("non-JSON provider failures retain authentication and rate-limit codes", async () => {
+  const providerSettings = settingsApi.normalize({
+    aiConfigVersion: 2,
+    activeProvider: "openrouter",
+    providers: {
+      openrouter: { apiKey: "router-key", model: "openai/gpt-5" },
+    },
+  });
+  for (const [status, code] of [[401, "INVALID_AI_KEY"], [429, "RATE_LIMITED"]]) {
+    const helpers = loadBackgroundHelpers({
+      settings: providerSettings,
+      fetchImpl: async () =>
+        streamingResponse([encode("upstream returned plain text")], {
+          ok: false,
+          status,
+        }),
+    });
+    const result = await helpers.callAiTranslation("Translate.", "Hello.");
+    assert.equal(result.success, false);
+    assert.equal(result.code, code);
+    assert.match(result.error, /OpenRouter/);
+  }
+});
+
+test("provider failure logging never includes reflected server secrets", () => {
+  const calls = [];
+  const helpers = loadBackgroundHelpers({
+    consoleImpl: {
+      log() {},
+      warn() {},
+      error(...args) {
+        calls.push(args);
+      },
+    },
+  });
+  const error = new Error("reflected-private-transcript-and-key");
+  error.code = "RATE_LIMITED";
+  error.provider = "openrouter";
+  error.status = 429;
+
+  helpers.logProviderFailure("Translation error", error);
+
+  assert.equal(JSON.stringify(calls).includes("reflected-private"), false);
+  assert.match(JSON.stringify(calls), /RATE_LIMITED/);
+  assert.match(JSON.stringify(calls), /openrouter/);
+});
+
+test("Supadata failures do not expose reflected response text", async () => {
+  const calls = [];
+  const storedSettings = settingsApi.normalize({
+    aiConfigVersion: 2,
+    activeProvider: "kimi-code",
+    providers: { "kimi-code": { apiKey: "kimi-test" } },
+    supadataApiKey: "supa-test",
+  });
+  const helpers = loadBackgroundHelpers({
+    settings: storedSettings,
+    consoleImpl: {
+      log() {},
+      warn() {},
+      error(...args) {
+        calls.push(args);
+      },
+    },
+    fetchImpl: async () => ({
+      ok: false,
+      status: 500,
+      json: async () => ({ message: "reflected-private-transcript" }),
+    }),
+  });
+
+  const result = await helpers.handleFetchTranscript("dQw4w9WgXcQ");
+  const visible = JSON.stringify({ result, calls });
+
+  assert.equal(result.success, false);
+  assert.equal(result.error, "SUPADATA_HTTP_ERROR");
+  assert.match(result.message, /HTTP 500/);
+  assert.equal(visible.includes("reflected-private"), false);
+});
+
+test("malformed OpenRouter output keeps provider-aware product errors", async () => {
+  const storedSettings = settingsApi.normalize({
+    aiConfigVersion: 2,
+    activeProvider: "openrouter",
+    providers: {
+      openrouter: { apiKey: "router-test", model: "openai/gpt-5" },
+    },
+  });
+  const fetchImpl = async (url) => {
+    if (url.startsWith("chrome-extension://")) {
+      const promptName = url.split("/").at(-1);
+      return { ok: true, text: async () => read(`prompts/${promptName}`) };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: "not valid product json" } }],
+      }),
+    };
+  };
+
+  const analysis = await loadBackgroundHelpers({
+    settings: storedSettings,
+    fetchImpl,
+  }).handleAnalyzeTranscript(
+    "[0:00] Example transcript.",
+    "Video",
+    "Channel",
+    "Description",
+    10,
+  );
+  const translation = await loadBackgroundHelpers({
+    settings: storedSettings,
+    fetchImpl,
+  }).handleTranslateContent(
+    { segments: [{ id: "segment-0", text: "English source sentence." }] },
+    "transcriptBatch",
+    "zh",
+    "Video",
+  );
+
+  for (const result of [analysis, translation]) {
+    assert.equal(result.success, false);
+    assert.equal(result.code, "INVALID_AI_RESPONSE");
+    assert.equal(result.provider, "openrouter");
+    assert.match(result.error, /OpenRouter/);
+  }
+});
+
+test("note cleanup parse warnings never log model output", () => {
+  const source = read("background.js");
+  assert.doesNotMatch(
+    source,
+    /console\.warn\([\s\S]{0,200}JSON parse failed[\s\S]{0,200}parseError/,
+  );
+  assert.match(source, /NOTE_CLEANUP_PARSE_FAILED/);
+});
+
+test("a revoked optional host permission stops before provider fetch", async () => {
+  let fetchCalls = 0;
+  const providerSettings = settingsApi.normalize({
+    aiConfigVersion: 2,
+    activeProvider: "openrouter",
+    providers: {
+      openrouter: { apiKey: "router-key", model: "openai/gpt-5" },
+    },
+  });
+  const helpers = loadBackgroundHelpers({
+    settings: providerSettings,
+    permissions: { contains: async () => false },
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      throw new Error("must not fetch");
+    },
+  });
+
+  const result = await helpers.callAiTranslation("Translate.", "Hello.");
+
+  assert.equal(result.success, false);
+  assert.equal(result.code, "AI_HOST_PERMISSION_REQUIRED");
+  assert.match(result.error, /OpenRouter/);
+  assert.equal(fetchCalls, 0);
+});
+
+test("connection testing accepts settings only from the trusted options page", async () => {
+  const requests = [];
+  const draft = settingsApi.normalize({
+    aiConfigVersion: 2,
+    activeProvider: "openrouter",
+    providers: {
+      openrouter: { apiKey: "router-key", model: "openai/gpt-5" },
+    },
+  });
+  const helpers = loadBackgroundHelpers({
+    fetchImpl: async (url, options) => {
+      requests.push({ url, body: JSON.parse(options.body) });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ choices: [{ message: { content: "OK" } }] }),
+      };
+    },
+  });
+
+  const rejected = await helpers.dispatchRuntimeMessage(
+    { action: "testAiConnection", settings: draft },
+    { url: "https://www.youtube.com/watch?v=test" },
+  );
+  assert.equal(rejected.success, false);
+  assert.equal(rejected.error, "UNTRUSTED_SETTINGS_TEST");
+  assert.equal(requests.length, 0);
+
+  const accepted = await helpers.dispatchRuntimeMessage(
+    { action: "testAiConnection", settings: draft },
+    { url: "chrome-extension://test/options.html" },
+  );
+  assert.equal(accepted.success, true);
+  assert.equal(accepted.provider, "OpenRouter");
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "https://openrouter.ai/api/v1/chat/completions");
+  assert.equal(requests[0].body.max_tokens, 8);
+  assert.deepEqual(requests[0].body.messages, [
+    { role: "user", content: "Reply with only OK." },
+  ]);
 });
 
 test("blank-line chunks reset provider idle timeout and valid JSON succeeds", async () => {

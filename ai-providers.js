@@ -73,12 +73,12 @@ var YTD_AI_PROVIDERS = (() => {
     const messages = separated.system
       ? [{ role: "system", content: separated.system }, ...separated.messages]
       : separated.messages;
-    const body = {
-      model,
-      max_tokens: input.maxTokens,
-      messages,
-    };
-    if (typeof input.temperature === "number") {
+    const body = { model, messages };
+    body[provider.maxTokensField || "max_tokens"] = input.maxTokens;
+    if (
+      typeof input.temperature === "number" &&
+      provider.supportsTemperature !== false
+    ) {
       body.temperature = input.temperature;
     }
 
@@ -204,6 +204,33 @@ var YTD_AI_PROVIDERS = (() => {
         );
       }
       const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
+      const finishReasons = candidates
+        .map((candidate) => candidate?.finishReason)
+        .filter((reason) => typeof reason === "string");
+      const blockedReasons = new Set([
+        "SAFETY",
+        "RECITATION",
+        "LANGUAGE",
+        "BLOCKLIST",
+        "PROHIBITED_CONTENT",
+        "SPII",
+        "IMAGE_SAFETY",
+        "IMAGE_PROHIBITED_CONTENT",
+      ]);
+      if (finishReasons.some((reason) => blockedReasons.has(reason))) {
+        throw providerError(
+          provider,
+          "AI_BLOCKED",
+          `${provider.name} blocked this request for safety reasons.`,
+        );
+      }
+      if (finishReasons.includes("MAX_TOKENS")) {
+        throw providerError(
+          provider,
+          "AI_RESPONSE_TRUNCATED",
+          `${provider.name} stopped because the response reached its token limit.`,
+        );
+      }
       text = candidates
         .flatMap((candidate) =>
           Array.isArray(candidate?.content?.parts)
@@ -227,13 +254,7 @@ var YTD_AI_PROVIDERS = (() => {
     return text;
   }
 
-  function safeServerMessage(data) {
-    const candidate = data?.error?.message || data?.message;
-    if (typeof candidate !== "string") return "";
-    return candidate.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 300);
-  }
-
-  function createHttpError(provider, status, data) {
+  function createHttpError(provider, status, _data) {
     let code = "PROVIDER_HTTP_ERROR";
     let summary = `returned HTTP ${status}`;
     if (status === 401 || status === 403) {
@@ -243,11 +264,10 @@ var YTD_AI_PROVIDERS = (() => {
       code = "RATE_LIMITED";
       summary = "rate-limited this request or reported insufficient quota";
     }
-    const detail = safeServerMessage(data);
     return providerError(
       provider,
       code,
-      `${provider.name} ${summary}.${detail ? ` ${detail}` : ""}`,
+      `${provider.name} ${summary}.`,
       status,
     );
   }

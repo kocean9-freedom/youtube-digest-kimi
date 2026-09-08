@@ -77,8 +77,11 @@ async function requestAiCompletion({
   messages,
   maxTokens,
   temperature,
+  settingsOverride,
 }) {
-  const settings = await getSettings();
+  const settings = settingsOverride
+    ? YTD_SETTINGS.normalize(settingsOverride)
+    : await getSettings();
   const provider = YTD_SETTINGS.getActiveProvider(settings);
   const profile = YTD_SETTINGS.getActiveProfile(settings);
   const request = YTD_AI_PROVIDERS.buildRequest(provider, profile, {
@@ -87,6 +90,7 @@ async function requestAiCompletion({
     maxTokens,
     temperature,
   });
+  await ensureAiHostPermission(provider, request.url);
 
   const controller = new AbortController();
   let timeoutKind = "";
@@ -157,6 +161,45 @@ async function requestAiCompletion({
   }
 }
 
+async function ensureAiHostPermission(provider, requestUrl) {
+  if (
+    provider?.id === YTD_SETTINGS.KIMI_PROVIDER_ID ||
+    typeof chrome.permissions?.contains !== "function"
+  ) {
+    return;
+  }
+  const originPattern = `${new URL(requestUrl).origin}/*`;
+  if (await chrome.permissions.contains({ origins: [originPattern] })) return;
+  const error = new Error(
+    `${provider.name} host access is not granted. Open Settings and save this provider again.`,
+  );
+  error.code = "AI_HOST_PERMISSION_REQUIRED";
+  error.provider = provider.id;
+  throw error;
+}
+
+async function testAiConnection(settings) {
+  try {
+    const normalized = YTD_SETTINGS.normalize(settings);
+    const { text, provider } = await requestAiCompletion({
+      messages: [{ role: "user", content: "Reply with only OK." }],
+      maxTokens: 8,
+      settingsOverride: normalized,
+    });
+    return {
+      success: true,
+      provider: provider.name,
+      reply: text.trim().slice(0, 100),
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      code: error.code || "AI_REQUEST_FAILED",
+    };
+  }
+}
+
 async function readBoundedAiResponse(response, onActivity, provider) {
   const providerName = provider?.name || "AI provider";
   const reader = response.body?.getReader?.();
@@ -183,7 +226,7 @@ async function readBoundedAiResponse(response, onActivity, provider) {
       responseText += decoder.decode(value, { stream: true });
     }
     responseText += decoder.decode();
-    return JSON.parse(responseText.trimStart());
+    return parseAiResponseText(responseText, response, provider);
   }
 
   // Some fetch implementations do not expose a readable stream. Preserve a
@@ -200,14 +243,59 @@ async function readBoundedAiResponse(response, onActivity, provider) {
       error.provider = provider?.id;
       throw error;
     }
-    return JSON.parse(responseText.trimStart());
+    return parseAiResponseText(responseText, response, provider);
   }
 
   // Legacy/test fetch shims may expose only json(). The hard and idle timers
   // still bound this fallback even though chunk-level activity is unavailable.
-  const data = await response.json();
-  onActivity();
-  return data;
+  try {
+    const data = await response.json();
+    onActivity();
+    return data;
+  } catch (_error) {
+    onActivity();
+    if (!response.ok) return {};
+    throw invalidAiResponseError(provider);
+  }
+}
+
+function parseAiResponseText(responseText, response, provider) {
+  const normalized = String(responseText || "").trimStart();
+  if (!normalized) {
+    if (!response.ok) return {};
+    throw invalidAiResponseError(provider);
+  }
+  try {
+    return JSON.parse(normalized);
+  } catch (_error) {
+    if (!response.ok) return {};
+    throw invalidAiResponseError(provider);
+  }
+}
+
+function invalidAiResponseError(provider) {
+  const error = new Error(`${provider?.name || "AI provider"} returned invalid JSON.`);
+  error.code = "INVALID_AI_RESPONSE";
+  error.provider = provider?.id || "unknown";
+  return error;
+}
+
+function invalidAiProductResponseError(provider, outputKind) {
+  const error = new Error(
+    `${provider?.name || "AI provider"} returned invalid ${outputKind}.`,
+  );
+  error.code = "INVALID_AI_RESPONSE";
+  error.provider = provider?.id || "unknown";
+  return error;
+}
+
+function logProviderFailure(label, error) {
+  const metadata = {
+    code: error?.code || "AI_REQUEST_FAILED",
+    provider: error?.provider || "unknown",
+  };
+  if (Number.isInteger(error?.status)) metadata.status = error.status;
+  console.error(label, metadata);
 }
 
 // ============================================================
@@ -334,6 +422,15 @@ chrome.tabs.onActivated.addListener(async ({ tabId, windowId }) => {
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // We need to return true to indicate we'll respond asynchronously
+  if (message.action === "testAiConnection") {
+    if (sender.url !== chrome.runtime.getURL("options.html")) {
+      sendResponse({ success: false, error: "UNTRUSTED_SETTINGS_TEST" });
+      return false;
+    }
+    testAiConnection(message.settings).then(sendResponse);
+    return true;
+  }
+
   if (message.action === "fetchTranscript") {
     handleFetchTranscript(message.videoId)
       .then(sendResponse)
@@ -672,7 +769,6 @@ async function handleFetchTranscript(videoId) {
     }
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
       if (response.status === 401) {
         return {
           success: false,
@@ -695,9 +791,10 @@ async function handleFetchTranscript(videoId) {
             "Supadata rate limit reached. Please wait a minute and try again.",
         };
       }
-      throw new Error(
-        errorData.message || `Supadata API error: ${response.status}`,
-      );
+      const error = new Error(`Supadata API error: HTTP ${response.status}`);
+      error.code = "SUPADATA_HTTP_ERROR";
+      error.status = response.status;
+      throw error;
     }
 
     const data = await response.json();
@@ -755,10 +852,14 @@ async function handleFetchTranscript(videoId) {
       language: typeof data.lang === "string" ? data.lang : null,
     };
   } catch (error) {
-    console.error("Transcript fetch error:", error);
+    const code = error?.code || "SUPADATA_REQUEST_FAILED";
+    const metadata = { code };
+    if (Number.isInteger(error?.status)) metadata.status = error.status;
+    console.error("Transcript fetch error", metadata);
     return {
       success: false,
-      error: error.message || "Failed to fetch transcript",
+      error: code,
+      message: error.message || "Failed to fetch transcript",
     };
   }
 }
@@ -966,7 +1067,7 @@ async function handleAnalyzeTranscript(
     debugLog(
       "[YouTube Digest] Requesting video analysis",
       provider.name,
-      settings.aiModel,
+      YTD_SETTINGS.getActiveProfile(settings).model,
     );
     const { text: responseText } = await requestAiCompletion({
       system: systemPrompt,
@@ -974,23 +1075,29 @@ async function handleAnalyzeTranscript(
       messages: [{ role: "user", content: userPrompt }],
     });
 
-    // Parse the JSON, tolerating trailing commas / stray prose
-    let analysis = parseLooseJson(responseText);
-
-    // Treat every model response as untrusted data. Rebuild the supported
-    // schema and derive display timestamps from validated numeric seconds.
-    analysis = validateAndFixTimestamps(analysis, maxTimestampSeconds);
+    let analysis;
+    try {
+      // Parse the JSON, tolerating trailing commas / stray prose. Then treat
+      // every model response as untrusted data and rebuild the supported schema.
+      analysis = validateAndFixTimestamps(
+        parseLooseJson(responseText),
+        maxTimestampSeconds,
+      );
+    } catch (_error) {
+      throw invalidAiProductResponseError(provider, "analysis data");
+    }
 
     return {
       success: true,
       analysis: analysis,
     };
   } catch (error) {
-    console.error("Analysis error:", error);
+    logProviderFailure("Analysis error", error);
     return {
       success: false,
       error: error.message || "Failed to analyze transcript",
       code: error.code || "AI_REQUEST_FAILED",
+      provider: error.provider || "unknown",
     };
   }
 }
@@ -1284,7 +1391,7 @@ async function handleSaveNote(
 
     return { success: true, note };
   } catch (error) {
-    console.error("[YouTube Digest] Save note error:", error);
+    logProviderFailure("[YouTube Digest] Save note error", error);
     return { success: false, error: error.message };
   }
 }
@@ -1339,11 +1446,10 @@ async function cleanupNoteText(
       if (typeof parsed.quote === "string" && parsed.quote.trim()) {
         return parsed.quote.trim().slice(0, 3000);
       }
-    } catch (parseError) {
-      console.warn(
-        "[YouTube Digest] JSON parse failed for note, stripping preambles:",
-        parseError,
-      );
+    } catch (_parseError) {
+      console.warn("[YouTube Digest] Note cleanup parse fallback", {
+        code: "NOTE_CLEANUP_PARSE_FAILED",
+      });
       result = result.replace(
         /^(Here'?s?( the)?( cleaned)?( version)?:?\s*)/i,
         "",
@@ -1359,7 +1465,7 @@ async function cleanupNoteText(
 
     return result.slice(0, 3000);
   } catch (e) {
-    console.error("[YouTube Digest] Cleanup error:", e);
+    logProviderFailure("[YouTube Digest] Cleanup error", e);
   }
 
   // Return combined raw text if cleanup fails
@@ -1459,7 +1565,7 @@ async function handleExplainSelection(
       explanation: explanation.trim(),
     };
   } catch (error) {
-    console.error("Explain selection error:", error);
+    logProviderFailure("Explain selection error", error);
     return {
       success: false,
       error: error.message || "Failed to explain selection",
@@ -1629,18 +1735,27 @@ async function handleTranslateContent(
     );
     if (!result.success) return result;
 
-    const parsed = parseLooseJson(result.text);
-    const aligned = normalizeTranslatedSegmentBatch(parsed, sourceSegments);
-    if (!aligned.segments.some((segment) => segment.text)) {
-      return {
-        success: false,
-        error: "Translation returned no valid Chinese segments",
-      };
+    let aligned;
+    try {
+      aligned = normalizeTranslatedSegmentBatch(
+        parseLooseJson(result.text),
+        sourceSegments,
+      );
+      if (!aligned.segments.some((segment) => segment.text)) {
+        throw new Error("No valid translated segments");
+      }
+    } catch (_error) {
+      throw invalidAiProductResponseError(provider, "translation data");
     }
     return { success: true, translatedContent: aligned };
   } catch (error) {
-    console.error("[YouTube Digest] Translation error:", error);
-    return { success: false, error: error.message || "Translation failed" };
+    logProviderFailure("[YouTube Digest] Translation error", error);
+    return {
+      success: false,
+      error: error.message || "Translation failed",
+      code: error.code || "AI_REQUEST_FAILED",
+      provider: error.provider || "unknown",
+    };
   }
 }
 
@@ -1674,11 +1789,15 @@ async function callAiTranslation(
 // Pure validators are exposed for the repository's Node tests only.
 globalThis.__YTD_TRANSLATION_TESTING__ = {
   requestAiCompletion,
+  testAiConnection,
   callAiTranslation,
   validateTranscriptBatchRequest,
   normalizeTranslatedSegmentBatch,
   handleSaveNote,
   handleTranslateContent,
+  handleAnalyzeTranscript,
   closePanelForTab,
   updatePanelForTab,
+  logProviderFailure,
+  handleFetchTranscript,
 };

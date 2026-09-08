@@ -1,15 +1,164 @@
 const YTD_OPTIONS = (() => {
   const LANGUAGE_STORAGE_KEY = "ytd_options_language";
   const PREVIEW_STORAGE_PREFIX = "youtubeDigestPreview:";
+  const OPENROUTER_MODELS_CACHE_KEY = "ytd_openrouter_models";
+  const OPENROUTER_MODELS_CACHE_MS = 24 * 60 * 60 * 1000;
   const SUPPORTED_LANGUAGES = new Set(["en", "zh-CN"]);
+  const REQUIRED_HOST_ORIGINS = new Set([
+    "https://www.youtube.com/*",
+    "https://api.supadata.ai/*",
+    "https://api.kimi.com/*",
+  ]);
+
+  function getSettingsApi() {
+    if (typeof YTD_SETTINGS !== "undefined") return YTD_SETTINGS;
+    if (typeof require === "function") return require("./settings.js");
+    throw new Error("Settings helpers are unavailable.");
+  }
+
+  function providerIdForMode(mode, advancedProviderId) {
+    if (mode === "kimi") return "kimi-code";
+    if (mode === "openrouter") return "openrouter";
+    const settingsApi = getSettingsApi();
+    return settingsApi.ADVANCED_PROVIDER_IDS.includes(advancedProviderId)
+      ? advancedProviderId
+      : "openai";
+  }
+
+  function buildSettingsFromForm(current, formValue) {
+    const settingsApi = getSettingsApi();
+    const normalized = settingsApi.normalize(current);
+    const activeProvider = Object.hasOwn(
+      settingsApi.PROVIDERS,
+      formValue.activeProvider,
+    )
+      ? formValue.activeProvider
+      : settingsApi.KIMI_PROVIDER_ID;
+    const providers = Object.fromEntries(
+      Object.entries(normalized.providers).map(([id, profile]) => [
+        id,
+        { ...profile },
+      ]),
+    );
+    const definition = settingsApi.PROVIDERS[activeProvider];
+    const activeProfile = {
+      ...providers[activeProvider],
+      apiKey: String(formValue.apiKey || "").trim(),
+    };
+    if (definition.editableModel) {
+      activeProfile.model = String(formValue.model || "").trim();
+    }
+    if (definition.editableBaseUrl) {
+      activeProfile.baseUrl = String(formValue.baseUrl || "").trim();
+    }
+    providers[activeProvider] = activeProfile;
+    return settingsApi.normalize({
+      aiConfigVersion: settingsApi.CONFIG_VERSION,
+      activeProvider,
+      providers,
+      supadataApiKey: String(formValue.supadataApiKey || "").trim(),
+    });
+  }
+
+  function clearProviderKey(persisted, providerId) {
+    const settingsApi = getSettingsApi();
+    const normalized = settingsApi.normalize(persisted);
+    if (!Object.hasOwn(settingsApi.PROVIDERS, providerId)) return normalized;
+    return settingsApi.normalize({
+      ...normalized,
+      providers: {
+        ...normalized.providers,
+        [providerId]: {
+          ...normalized.providers[providerId],
+          apiKey: "",
+        },
+      },
+    });
+  }
+
+  function requiredOriginPattern(settings) {
+    const settingsApi = getSettingsApi();
+    const normalized = settingsApi.normalize(settings);
+    const provider = settingsApi.getActiveProvider(normalized);
+    const profile = settingsApi.getActiveProfile(normalized);
+    const baseUrl = provider.editableBaseUrl
+      ? profile.baseUrl
+      : provider.baseUrl;
+    const url = new URL(settingsApi.validateCustomBaseUrl(baseUrl));
+    return `${url.origin}/*`;
+  }
+
+  async function requestProviderPermission(chromeApi, originPattern) {
+    if (!chromeApi?.permissions) return true;
+    // Call request directly while the save/test click still owns the user
+    // gesture. Chrome returns true without another prompt when already granted.
+    return chromeApi.permissions.request({ origins: [originPattern] });
+  }
+
+  function optionalOriginsToRemove(origins) {
+    return (Array.isArray(origins) ? origins : []).filter(
+      (origin) => !REQUIRED_HOST_ORIGINS.has(origin),
+    );
+  }
+
+  function filterOpenRouterModels(models, query, limit = 100) {
+    const normalizedQuery = String(query || "").trim().toLowerCase();
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 200));
+    return (Array.isArray(models) ? models : [])
+      .filter(
+        (model) =>
+          typeof model?.id === "string" &&
+          typeof model?.name === "string" &&
+          (!normalizedQuery ||
+            model.id.toLowerCase().includes(normalizedQuery) ||
+            model.name.toLowerCase().includes(normalizedQuery)),
+      )
+      .slice(0, safeLimit)
+      .map((model) => ({ id: model.id, name: model.name }));
+  }
+
+  function isModelCacheFresh(cachedAt, now = Date.now()) {
+    return (
+      Number.isFinite(cachedAt) &&
+      cachedAt > 0 &&
+      now - cachedAt >= 0 &&
+      now - cachedAt < OPENROUTER_MODELS_CACHE_MS
+    );
+  }
+
+  async function fetchOpenRouterModels(fetchImpl, apiKey) {
+    const key = String(apiKey || "").trim();
+    if (!key) throw new Error("OpenRouter API key is required.");
+    const response = await fetchImpl("https://openrouter.ai/api/v1/models", {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    if (!response.ok) {
+      throw new Error(`OpenRouter models request failed with HTTP ${response.status}.`);
+    }
+    const data = await response.json();
+    if (!Array.isArray(data?.data)) {
+      throw new Error("OpenRouter returned an invalid model list.");
+    }
+    return data.data
+      .filter((model) => typeof model?.id === "string" && model.id.trim())
+      .slice(0, 5000)
+      .map((model) => {
+        const id = model.id.trim().slice(0, 256);
+        const name =
+          typeof model.name === "string" && model.name.trim()
+            ? model.name.trim().slice(0, 256)
+            : id;
+        return { id, name };
+      });
+  }
 
   const COPY = {
     en: {
       pageTitle: "YouTube Digest Settings",
       languageGroupLabel: "Interface language",
       heading: "Bring your own API keys",
-      lede:
-        "Keys stay in this Chrome profile and are sent only to Supadata and Kimi Code. This open-source extension has no developer server or analytics.",
+      ledeMulti:
+        "Keys stay in this Chrome profile. AI content is sent only to the provider you select.",
       transcriptProvider: "Transcript provider",
       supadataApiKeyLabel: "Supadata API key",
       supadataHelp: "Used to fetch timestamped YouTube subtitles. ",
@@ -17,54 +166,62 @@ const YTD_OPTIONS = (() => {
       supadataHelpSuffix:
         ". Supadata generates the key during onboarding.",
       aiProvider: "AI provider",
-      providerSummaryLabel: "Supported AI provider",
-      providerBadge: "Supported in this version",
+      providerChoiceHelp:
+        "Choose one mode. Saved keys stay separate for every provider.",
+      providerModeLabel: "AI provider mode",
+      modeKimiTitle: "Kimi Coding Plan",
+      modeKimiCopy: "Default and ready with your Kimi Coding Plan key.",
+      modeOpenRouterTitle: "OpenRouter simple",
+      modeOpenRouterCopy: "Use one key to choose from many hosted models.",
+      modeAdvancedTitle: "Official / custom",
+      modeAdvancedCopy: "Connect directly with official or compatible APIs.",
+      defaultModeBadge: "Default mode",
       kimiApiKeyLabel: "Kimi Code API key",
-      kimiHelp:
-        "YouTube Digest uses Kimi K2.7 Code through Kimi Coding Plan for overviews, explanations, translation, and note polishing. ",
       kimiLink: "Create a Kimi Code API key",
-      kimiHelpSuffix: ".",
-      privacyNote:
-        "When you use AI features, Kimi Code receives the video transcript and relevant video context. Review Kimi's terms and membership usage rules before saving.",
+      kimiFixedHelp:
+        "Uses the fixed kimi-for-coding model with Thinking ON. ",
+      openrouterApiKeyLabel: "OpenRouter API key",
+      modelSearchLabel: "Search model directory",
+      refreshModels: "Refresh models",
+      modelIdLabel: "Model ID",
+      openrouterHelp:
+        "The directory is cached for 24 hours. You can always type a model ID manually. ",
+      openrouterKeyLink: "Create an OpenRouter key",
+      directProviderLabel: "Direct provider",
+      providerApiKeyLabel: "Provider API key",
+      baseUrlLabel: "Base URL",
+      providerDocs: "Official provider documentation",
+      selectedProviderPrivacy:
+        "Transcripts, selected text, and note-cleanup context go only to the selected provider. OpenRouter may route them to the chosen model's host.",
+      testConnection: "Test connection",
+      deleteCurrentKey: "Delete current provider key",
       saveSettings: "Save settings",
-      localRemix: "Local remix",
-      customizationTitle: "Want to use another AI model?",
-      customizationPurpose: "Edit and copy a safe prompt for your coding agent",
-      agentBadge: "Coding agent ready",
-      customizationIntro:
-        "You can edit the prompt directly. Complete these three steps before copying:",
-      customizationStepFolder:
-        "Open the extracted YouTube Digest project folder in your coding agent.",
-      customizationStepReplace:
-        "Replace [PROVIDER] and [MODEL] with the service and model you want to use.",
-      customizationStepKeys:
-        "Never include API keys in the prompt or chat. Enter them yourself after the code is ready.",
-      customizationPromptLabel: "Editable customization prompt",
-      customizationReminderLabel: "Prompt reminder",
-      customizationReminder:
-        "Before copying, replace [PROVIDER] and [MODEL] with the provider and model you want to use.",
-      customizationPrompt:
-        "Customize this local YouTube Digest workspace to use [PROVIDER] with [MODEL]. Work only in the current workspace. Before editing, verify that it contains manifest.json and that the manifest name is YouTube Digest. If verification fails, stop and ask me to open the extracted YouTube Digest project folder in my coding agent. Do not search other folders, edit a guessed copy, assume an installation path, or claim Chrome can reveal the absolute OS source path. Update the provider's API endpoint, request format, and minimum Chrome host permissions. Preserve bring-your-own-key and local Chrome storage. Never put API keys in source code, commits, logs, screenshots, this prompt, or chat; after the code is ready, tell me where to enter the key myself. Keep provider-specific request fields and retry behavior isolated so one provider does not affect another. Update README.md, README.zh-CN.md, PRIVACY.md, SECURITY.md, and tests. Run npm test, npm run check, and npm run package. Then explain how to reload the unpacked extension and test it on a real YouTube video.",
-      copyCustomizationPrompt: "Copy edited prompt",
       localData: "Local data",
       localDataHelp:
-        "Digests, translations, and notes are stored only in this Chrome profile. You can remove them at any time.",
+        "Digests, translations, notes, provider settings, and keys are stored only in this Chrome profile.",
       clearCache: "Clear cached digests",
       deleteNotes: "Delete all notes",
       resetData: "Reset extension data",
       footer:
         'Read <a href="PRIVACY.md" target="_blank">PRIVACY.md</a> in the repository for the complete data-flow description.',
-      migrationWarning:
-        "Previous AI provider settings were removed safely. Your Supadata key was kept, but the old AI key was cleared. Enter a Kimi Code API key to continue.",
       saving: "Saving…",
       addSupadataKey: "Add a Supadata API key.",
-      addKimiKey: "Add a Kimi Code API key.",
       saved: "Saved. Reopen YouTube Digest to use these settings.",
-      saveFailed: "Could not save settings. Please try again.",
-      copying: "Copying…",
-      promptCopied: "Edited prompt copied.",
-      copyFailed:
-        "Could not copy the prompt. Select the prompt text and copy it manually.",
+      providerKeyRequired: "Add an API key for the selected provider.",
+      modelRequired: "Enter the exact model ID for the selected provider.",
+      permissionDenied:
+        "Chrome access was not granted for the selected provider origin.",
+      testingConnection: "Testing connection. This may use a small amount of quota…",
+      connectionOk: ({ provider }) => `${provider} connection succeeded.`,
+      connectionFailed: ({ provider, message }) =>
+        `${provider} connection failed: ${message}`,
+      modelsLoading: "Loading the OpenRouter model directory…",
+      modelsLoaded: ({ count }) => `Loaded ${count} OpenRouter models.`,
+      modelsFailed:
+        "Could not load the model directory. Enter a model ID manually.",
+      deleteCurrentKeyConfirm: ({ provider }) =>
+        `Delete the saved ${provider} API key from this Chrome profile?`,
+      currentKeyDeleted: ({ provider }) => `${provider} API key deleted.`,
       clearedDigests: ({ count }) =>
         `Cleared ${count} cached digest${count === 1 ? "" : "s"}.`,
       notesDeleted: "Deleted all saved notes.",
@@ -78,60 +235,65 @@ const YTD_OPTIONS = (() => {
       pageTitle: "YouTube Digest 设置",
       languageGroupLabel: "界面语言",
       heading: "使用你自己的 API 密钥",
-      lede:
-        "密钥仅保存在当前 Chrome 个人资料中，只会发送给 Supadata 和 Kimi Code。本开源扩展没有开发者服务器，也不使用分析服务。",
+      ledeMulti:
+        "密钥仅保存在当前 Chrome 个人资料中。AI 内容只会发送给你主动选择的服务。",
       transcriptProvider: "字幕服务",
       supadataApiKeyLabel: "Supadata API 密钥",
       supadataHelp: "用于获取带时间戳的 YouTube 字幕。",
       supadataLink: "创建 Supadata 账号并获取密钥",
       supadataHelpSuffix: "。Supadata 会在引导流程中生成密钥。",
       aiProvider: "AI 服务",
-      providerSummaryLabel: "支持的 AI 服务",
-      providerBadge: "当前版本支持",
+      providerChoiceHelp: "选择一种模式。每个服务已保存的密钥相互独立。",
+      providerModeLabel: "AI 服务模式",
+      modeKimiTitle: "Kimi Coding Plan",
+      modeKimiCopy: "默认模式，填写 Kimi Coding Plan 密钥即可使用。",
+      modeOpenRouterTitle: "OpenRouter 简易模式",
+      modeOpenRouterCopy: "使用一个密钥选择大量托管模型。",
+      modeAdvancedTitle: "官方 / 自定义接口",
+      modeAdvancedCopy: "直接连接官方接口或兼容服务。",
+      defaultModeBadge: "默认模式",
       kimiApiKeyLabel: "Kimi Code API 密钥",
-      kimiHelp:
-        "YouTube Digest 通过 Kimi Coding Plan 使用 Kimi K2.7 Code 生成概览、解释内容、翻译字幕和润色笔记。",
       kimiLink: "创建 Kimi Code API 密钥",
-      kimiHelpSuffix: "。",
-      privacyNote:
-        "使用 AI 功能时，Kimi Code 会收到视频字幕及相关视频上下文。保存前请查看 Kimi 的服务条款和会员额度规则。",
+      kimiFixedHelp: "固定使用 kimi-for-coding，并保持 Thinking ON。",
+      openrouterApiKeyLabel: "OpenRouter API 密钥",
+      modelSearchLabel: "搜索模型目录",
+      refreshModels: "刷新模型",
+      modelIdLabel: "模型 ID",
+      openrouterHelp: "模型目录缓存 24 小时，也可以随时手动填写模型 ID。",
+      openrouterKeyLink: "创建 OpenRouter 密钥",
+      directProviderLabel: "直连服务",
+      providerApiKeyLabel: "当前服务的 API 密钥",
+      baseUrlLabel: "Base URL",
+      providerDocs: "当前服务官方文档",
+      selectedProviderPrivacy:
+        "字幕、选中文本和笔记润色上下文只会发送给当前服务。OpenRouter 可能把内容路由给所选模型的托管方。",
+      testConnection: "测试连接",
+      deleteCurrentKey: "删除当前服务密钥",
       saveSettings: "保存设置",
-      localRemix: "本地改造",
-      customizationTitle: "想使用其他 AI 模型？",
-      customizationPurpose: "编辑并复制一段可安全交给编程 Agent 的提示词",
-      agentBadge: "可交给编程 Agent",
-      customizationIntro: "你可以直接编辑提示词。复制前完成以下三步：",
-      customizationStepFolder:
-        "在编程 Agent 中打开 YouTube Digest 解压后的项目文件夹。",
-      customizationStepReplace:
-        "把 [PROVIDER] 和 [MODEL] 替换成你想使用的服务和模型。",
-      customizationStepKeys:
-        "不要在提示词或聊天中加入 API 密钥。代码准备好后，请自行填写。",
-      customizationPromptLabel: "可编辑的自定义提示词",
-      customizationReminderLabel: "提示词提醒",
-      customizationReminder:
-        "复制前，请先把 [PROVIDER] 和 [MODEL] 替换成你想使用的服务和模型。",
-      customizationPrompt:
-        "请把当前本地 YouTube Digest 工作区改为使用 [PROVIDER] 提供的 [MODEL]。只在当前工作区中操作。编辑前，先确认其中包含 manifest.json，且 manifest 中的 name 是 YouTube Digest。如果验证失败，请停止，并让我在编程 Agent 中打开 YouTube Digest 解压后的项目文件夹。不要搜索其他文件夹，不要编辑猜测的副本，不要假设安装路径，也不要声称 Chrome 可以显示操作系统中的绝对源码路径。更新该服务的 API endpoint、请求格式和最少的 Chrome host permissions。保留用户自带密钥模式和 Chrome 本地存储。不要把 API 密钥写入源代码、提交记录、日志、截图、这段提示词或聊天；代码准备好后，请告诉我应该在哪里自行填写密钥。供应商专用的请求参数和重试逻辑请分别处理，避免一个供应商的规则影响另一个。更新 README.md、README.zh-CN.md、PRIVACY.md、SECURITY.md 和测试。运行 npm test、npm run check 和 npm run package。最后，说明如何重新加载已解压的扩展，并在真实 YouTube 视频上测试。",
-      copyCustomizationPrompt: "复制编辑后的提示词",
       localData: "本地数据",
       localDataHelp:
-        "摘要、翻译和笔记仅保存在当前 Chrome 个人资料中。你可以随时删除。",
+        "摘要、翻译、笔记、服务设置和密钥仅保存在当前 Chrome 个人资料中。",
       clearCache: "清除缓存的摘要",
       deleteNotes: "删除全部笔记",
       resetData: "重置扩展数据",
       footer:
         '完整数据流说明请参阅仓库中的 <a href="PRIVACY.md" target="_blank">PRIVACY.md</a>。',
-      migrationWarning:
-        "已安全移除之前的 AI 服务设置。Supadata 密钥已保留，旧 AI 密钥已清除。请输入 Kimi Code API 密钥以继续使用。",
       saving: "正在保存…",
       addSupadataKey: "请添加 Supadata API 密钥。",
-      addKimiKey: "请添加 Kimi Code API 密钥。",
       saved: "已保存。请重新打开 YouTube Digest 以使用这些设置。",
-      saveFailed: "无法保存设置，请重试。",
-      copying: "正在复制…",
-      promptCopied: "已复制编辑后的提示词。",
-      copyFailed: "无法复制提示词。请选中提示词文本并手动复制。",
+      providerKeyRequired: "请填写当前所选服务的 API 密钥。",
+      modelRequired: "请填写当前所选服务的准确模型 ID。",
+      permissionDenied: "未授予访问当前服务接口域名的 Chrome 权限。",
+      testingConnection: "正在测试连接，此操作可能消耗少量额度……",
+      connectionOk: ({ provider }) => `${provider} 连接成功。`,
+      connectionFailed: ({ provider, message }) =>
+        `${provider} 连接失败：${message}`,
+      modelsLoading: "正在加载 OpenRouter 模型目录……",
+      modelsLoaded: ({ count }) => `已加载 ${count} 个 OpenRouter 模型。`,
+      modelsFailed: "无法加载模型目录，请手动填写模型 ID。",
+      deleteCurrentKeyConfirm: ({ provider }) =>
+        `要从当前 Chrome 个人资料中删除 ${provider} API 密钥吗？`,
+      currentKeyDeleted: ({ provider }) => `已删除 ${provider} API 密钥。`,
       clearedDigests: ({ count }) => `已清除 ${count} 条缓存摘要。`,
       notesDeleted: "已删除全部已保存的笔记。",
       resetConfirm:
@@ -274,62 +436,6 @@ const YTD_OPTIONS = (() => {
     }
   }
 
-  function updateLocalizedPrompt(textarea, prompt) {
-    const selectionStart = textarea.selectionStart;
-    const selectionEnd = textarea.selectionEnd;
-    const selectionDirection = textarea.selectionDirection;
-    const scrollTop = textarea.scrollTop;
-    const scrollLeft = textarea.scrollLeft;
-
-    textarea.value = prompt;
-
-    if (
-      Number.isInteger(selectionStart) &&
-      Number.isInteger(selectionEnd) &&
-      typeof textarea.setSelectionRange === "function"
-    ) {
-      textarea.setSelectionRange(
-        Math.min(selectionStart, prompt.length),
-        Math.min(selectionEnd, prompt.length),
-        selectionDirection || "none",
-      );
-    }
-    textarea.scrollTop = scrollTop;
-    textarea.scrollLeft = scrollLeft;
-  }
-
-  function createPromptDrafts() {
-    return {
-      en: translate("en", "customizationPrompt"),
-      "zh-CN": translate("zh-CN", "customizationPrompt"),
-    };
-  }
-
-  function switchPromptDraft(
-    drafts,
-    currentLanguage,
-    nextLanguage,
-    currentValue,
-  ) {
-    const normalizedCurrentLanguage = normalizeLanguage(currentLanguage);
-    const normalizedNextLanguage = normalizeLanguage(nextLanguage);
-    drafts[normalizedCurrentLanguage] = String(currentValue ?? "");
-    if (typeof drafts[normalizedNextLanguage] !== "string") {
-      drafts[normalizedNextLanguage] = translate(
-        normalizedNextLanguage,
-        "customizationPrompt",
-      );
-    }
-    return {
-      language: normalizedNextLanguage,
-      prompt: drafts[normalizedNextLanguage],
-    };
-  }
-
-  async function copyPromptValue(clipboard, value) {
-    await clipboard.writeText(value);
-  }
-
   function getSafeLocalStorage(root) {
     try {
       return root.localStorage;
@@ -343,24 +449,33 @@ const YTD_OPTIONS = (() => {
     const settingsApi = root.YTD_SETTINGS;
     if (!doc || !settingsApi) return;
 
-    const storage = createStorageAdapter(
-      root.chrome,
-      getSafeLocalStorage(root),
-    );
+    const storage = createStorageAdapter(root.chrome, getSafeLocalStorage(root));
     const form = doc.getElementById("settingsForm");
-    const aiApiKeyInput = doc.getElementById("aiApiKey");
-    const supadataApiKeyInput = doc.getElementById("supadataApiKey");
-    const customizationPrompt = doc.getElementById("customizationPrompt");
-    const copyCustomizationPromptBtn = doc.getElementById(
-      "copyCustomizationPromptBtn",
-    );
-    const copyStatus = doc.getElementById("copyStatus");
+    const supadataInput = doc.getElementById("supadataApiKey");
+    const kimiKeyInput = doc.getElementById("kimiApiKey");
+    const openrouterKeyInput = doc.getElementById("openrouterApiKey");
+    const openrouterModelInput = doc.getElementById("openrouterModel");
+    const modelSearchInput = doc.getElementById("openrouterModelSearch");
+    const modelList = doc.getElementById("openrouterModelList");
+    const advancedProviderInput = doc.getElementById("advancedProvider");
+    const advancedKeyInput = doc.getElementById("advancedApiKey");
+    const advancedModelInput = doc.getElementById("advancedModel");
+    const advancedBaseUrlInput = doc.getElementById("advancedBaseUrl");
+    const advancedBaseUrlGroup = doc.getElementById("advancedBaseUrlGroup");
+    const providerDocsLink = doc.getElementById("providerDocsLink");
+    const protocolLabel = doc.getElementById("protocolLabel");
+    const providerBadge = doc.getElementById("activeProviderBadge");
+    const permissionOrigin = doc.getElementById("permissionOrigin");
     const saveStatus = doc.getElementById("saveStatus");
     const dataStatus = doc.getElementById("dataStatus");
     const languageButtons = [...doc.querySelectorAll("[data-language]")];
+    const modeInputs = [...doc.querySelectorAll('input[name="providerMode"]')];
+    const providerPanels = [...doc.querySelectorAll("[data-provider-panel]")];
     const statusStates = new Map();
-    const promptDrafts = createPromptDrafts();
     let currentLanguage = "en";
+    let currentSettings = settingsApi.normalize();
+    let openrouterModels = [];
+    let renderedProviderId = null;
 
     function renderStatus(element) {
       const state = statusStates.get(element);
@@ -375,21 +490,11 @@ const YTD_OPTIONS = (() => {
     }
 
     function applyLanguage(language) {
-      const nextDraft = switchPromptDraft(
-        promptDrafts,
-        currentLanguage,
-        language,
-        customizationPrompt.value,
-      );
-      currentLanguage = nextDraft.language;
+      currentLanguage = normalizeLanguage(language);
       doc.documentElement.lang = currentLanguage;
       doc.title = translate(currentLanguage, "pageTitle");
-
       for (const element of doc.querySelectorAll("[data-i18n]")) {
-        element.textContent = translate(
-          currentLanguage,
-          element.dataset.i18n,
-        );
+        element.textContent = translate(currentLanguage, element.dataset.i18n);
       }
       for (const element of doc.querySelectorAll("[data-i18n-html]")) {
         element.innerHTML = translate(
@@ -403,80 +508,282 @@ const YTD_OPTIONS = (() => {
           translate(currentLanguage, element.dataset.i18nAriaLabel),
         );
       }
-
-      updateLocalizedPrompt(
-        customizationPrompt,
-        nextDraft.prompt,
-      );
       updateLanguageButtonState(languageButtons, currentLanguage);
       for (const element of statusStates.keys()) renderStatus(element);
     }
 
-    async function loadSettings() {
-      try {
-        const stored = await storage.get(settingsApi.STORAGE_KEY);
-        const migration = settingsApi.migrateProviderSettings(
-          stored[settingsApi.STORAGE_KEY],
-        );
-        const settings = migration.settings;
+    function selectedMode() {
+      return modeInputs.find((input) => input.checked)?.value || "kimi";
+    }
 
-        aiApiKeyInput.value = settings.aiApiKey;
-        supadataApiKeyInput.value = settings.supadataApiKey;
-        if (migration.migrated) {
-          await storage.set({ [settingsApi.STORAGE_KEY]: settings });
-          setStatus(saveStatus, "migrationWarning");
-        }
-      } catch (_error) {
-        setStatus(saveStatus, "settingsLoadFailed");
+    function selectedProviderId() {
+      return providerIdForMode(selectedMode(), advancedProviderInput.value);
+    }
+
+    function setModeForProvider(providerId) {
+      const mode = settingsApi.PROVIDERS[providerId]?.mode || "kimi";
+      for (const input of modeInputs) input.checked = input.value === mode;
+      if (mode === "advanced") advancedProviderInput.value = providerId;
+    }
+
+    function activeFieldValues() {
+      const providerId = selectedProviderId();
+      if (providerId === "kimi-code") {
+        return { providerId, apiKey: kimiKeyInput.value, model: "", baseUrl: "" };
+      }
+      if (providerId === "openrouter") {
+        return {
+          providerId,
+          apiKey: openrouterKeyInput.value,
+          model: openrouterModelInput.value,
+          baseUrl: "",
+        };
+      }
+      return {
+        providerId,
+        apiKey: advancedKeyInput.value,
+        model: advancedModelInput.value,
+        baseUrl: advancedBaseUrlInput.value,
+      };
+    }
+
+    function captureRenderedProvider() {
+      if (!renderedProviderId) return;
+      let values;
+      if (renderedProviderId === "kimi-code") {
+        values = { apiKey: kimiKeyInput.value, model: "", baseUrl: "" };
+      } else if (renderedProviderId === "openrouter") {
+        values = {
+          apiKey: openrouterKeyInput.value,
+          model: openrouterModelInput.value,
+          baseUrl: "",
+        };
+      } else {
+        values = {
+          apiKey: advancedKeyInput.value,
+          model: advancedModelInput.value,
+          baseUrl: advancedBaseUrlInput.value,
+        };
+      }
+      currentSettings = buildSettingsFromForm(currentSettings, {
+        activeProvider: renderedProviderId,
+        ...values,
+        supadataApiKey: supadataInput.value,
+      });
+    }
+
+    function draftSettings() {
+      const values = activeFieldValues();
+      return buildSettingsFromForm(currentSettings, {
+        activeProvider: values.providerId,
+        apiKey: values.apiKey,
+        model: values.model,
+        baseUrl: values.baseUrl,
+        supadataApiKey: supadataInput.value,
+      });
+    }
+
+    function renderModelOptions() {
+      const filtered = filterOpenRouterModels(
+        openrouterModels,
+        modelSearchInput.value,
+      );
+      modelList.replaceChildren();
+      for (const model of filtered) {
+        const option = doc.createElement("option");
+        option.value = model.id;
+        option.label = model.name;
+        modelList.append(option);
       }
     }
 
-    async function loadOptions() {
-      try {
-        applyLanguage(await readPreferredLanguage(storage));
-      } catch (_error) {
-        applyLanguage("en");
+    function renderProvider() {
+      const mode = selectedMode();
+      for (const panel of providerPanels) {
+        panel.hidden = panel.dataset.providerPanel !== mode;
       }
-      await loadSettings();
+
+      const providerId = selectedProviderId();
+      const provider = settingsApi.PROVIDERS[providerId];
+      const profile = currentSettings.providers[providerId];
+      providerBadge.textContent = provider.name;
+      if (providerId === "kimi-code") {
+        kimiKeyInput.value = profile.apiKey;
+      } else if (providerId === "openrouter") {
+        openrouterKeyInput.value = profile.apiKey;
+        openrouterModelInput.value = profile.model;
+      } else {
+        advancedKeyInput.value = profile.apiKey;
+        advancedModelInput.value = profile.model;
+        advancedBaseUrlGroup.hidden = !provider.editableBaseUrl;
+        advancedBaseUrlInput.value = profile.baseUrl || provider.baseUrl;
+        protocolLabel.textContent = `${provider.protocol} ·`;
+        providerDocsLink.hidden = !provider.docsUrl;
+        if (provider.docsUrl) providerDocsLink.href = provider.docsUrl;
+      }
+      try {
+        permissionOrigin.textContent = `API origin: ${requiredOriginPattern({
+          ...currentSettings,
+          activeProvider: providerId,
+        })}`;
+      } catch (_error) {
+        permissionOrigin.textContent = "";
+      }
+      renderedProviderId = providerId;
+    }
+
+    function renderDraftPermissionOrigin() {
+      try {
+        permissionOrigin.textContent = `API origin: ${requiredOriginPattern(
+          draftSettings(),
+        )}`;
+      } catch (_error) {
+        permissionOrigin.textContent = "";
+      }
+    }
+
+    function validateDraft(draft, requireSupadata) {
+      const provider = settingsApi.getActiveProvider(draft);
+      const profile = settingsApi.getActiveProfile(draft);
+      if (requireSupadata && !draft.supadataApiKey) {
+        throw new Error(translate(currentLanguage, "addSupadataKey"));
+      }
+      if (!profile.apiKey) {
+        throw new Error(translate(currentLanguage, "providerKeyRequired"));
+      }
+      if (provider.editableModel && !profile.model) {
+        throw new Error(translate(currentLanguage, "modelRequired"));
+      }
+      return { provider, profile };
+    }
+
+    async function ensurePermission(draft) {
+      if (draft.activeProvider === "kimi-code") return true;
+      return requestProviderPermission(
+        root.chrome,
+        requiredOriginPattern(draft),
+      );
+    }
+
+    async function hasPermission(draft) {
+      if (draft.activeProvider === "kimi-code") return true;
+      if (!root.chrome?.permissions) return true;
+      return root.chrome.permissions.contains({
+        origins: [requiredOriginPattern(draft)],
+      });
     }
 
     async function saveSettings(event) {
       event.preventDefault();
       setStatus(saveStatus, "saving");
-
-      const settings = settingsApi.normalize({
-        aiApiKey: aiApiKeyInput.value,
-        supadataApiKey: supadataApiKeyInput.value,
-      });
-
-      if (!settings.supadataApiKey) {
-        setStatus(saveStatus, "addSupadataKey");
-        return;
-      }
-      if (!settings.aiApiKey) {
-        setStatus(saveStatus, "addKimiKey");
-        return;
-      }
-
       try {
-        await storage.set({ [settingsApi.STORAGE_KEY]: settings });
+        const draft = draftSettings();
+        validateDraft(draft, true);
+        if (!(await ensurePermission(draft))) {
+          setStatus(saveStatus, "permissionDenied");
+          return;
+        }
+        await storage.set({ [settingsApi.STORAGE_KEY]: draft });
+        currentSettings = draft;
         setStatus(saveStatus, "saved");
-      } catch (_error) {
-        setStatus(saveStatus, "saveFailed");
+        renderProvider();
+      } catch (error) {
+        saveStatus.textContent = error.message;
       }
     }
 
-    async function copyCustomizationPrompt() {
-      setStatus(copyStatus, "copying");
+    async function testConnection() {
+      let provider;
       try {
-        await copyPromptValue(
-          root.navigator.clipboard,
-          customizationPrompt.value,
-        );
-        setStatus(copyStatus, "promptCopied");
-      } catch (_error) {
-        setStatus(copyStatus, "copyFailed");
+        const draft = draftSettings();
+        ({ provider } = validateDraft(draft, false));
+        if (!(await ensurePermission(draft))) {
+          setStatus(saveStatus, "permissionDenied");
+          return;
+        }
+        setStatus(saveStatus, "testingConnection");
+        const result = await root.chrome.runtime.sendMessage({
+          action: "testAiConnection",
+          settings: draft,
+        });
+        if (!result?.success) {
+          throw new Error(result?.error || "Unknown provider error");
+        }
+        setStatus(saveStatus, "connectionOk", { provider: provider.name });
+      } catch (error) {
+        const providerName = provider?.name || providerBadge.textContent;
+        setStatus(saveStatus, "connectionFailed", {
+          provider: providerName,
+          message: error.message,
+        });
       }
+    }
+
+    async function loadOpenRouterModels(force = false) {
+      let draft;
+      if (force) {
+        draft = draftSettings();
+        if (!(await ensurePermission(draft))) {
+          setStatus(saveStatus, "permissionDenied");
+          return;
+        }
+      }
+      const cached = await storage.get(OPENROUTER_MODELS_CACHE_KEY);
+      const cache = cached[OPENROUTER_MODELS_CACHE_KEY];
+      if (
+        !force &&
+        Array.isArray(cache?.models) &&
+        isModelCacheFresh(cache.cachedAt)
+      ) {
+        openrouterModels = cache.models;
+        renderModelOptions();
+        return;
+      }
+      if (!force && selectedProviderId() !== "openrouter") {
+        return;
+      }
+      setStatus(saveStatus, "modelsLoading");
+      try {
+        draft ||= draftSettings();
+        const profile = draft.providers.openrouter;
+        if (!force && !(await hasPermission(draft))) {
+          return;
+        }
+        openrouterModels = await fetchOpenRouterModels(root.fetch, profile.apiKey);
+        await storage.set({
+          [OPENROUTER_MODELS_CACHE_KEY]: {
+            models: openrouterModels,
+            cachedAt: Date.now(),
+          },
+        });
+        renderModelOptions();
+        setStatus(saveStatus, "modelsLoaded", { count: openrouterModels.length });
+      } catch (_error) {
+        setStatus(saveStatus, "modelsFailed");
+      }
+    }
+
+    async function deleteCurrentKey() {
+      const providerId = selectedProviderId();
+      const provider = settingsApi.PROVIDERS[providerId];
+      if (
+        !root.confirm(
+          translate(currentLanguage, "deleteCurrentKeyConfirm", {
+            provider: provider.name,
+          }),
+        )
+      ) {
+        return;
+      }
+      const stored = await storage.get(settingsApi.STORAGE_KEY);
+      currentSettings = clearProviderKey(
+        stored[settingsApi.STORAGE_KEY],
+        providerId,
+      );
+      await storage.set({ [settingsApi.STORAGE_KEY]: currentSettings });
+      setModeForProvider(providerId);
+      renderProvider();
+      setStatus(saveStatus, "currentKeyDeleted", { provider: provider.name });
     }
 
     async function clearCachedDigests() {
@@ -492,33 +799,74 @@ const YTD_OPTIONS = (() => {
     }
 
     async function resetAllData() {
-      const confirmed = root.confirm(
-        translate(currentLanguage, "resetConfirm"),
-      );
-      if (!confirmed) return;
-
+      if (!root.confirm(translate(currentLanguage, "resetConfirm"))) return;
       await storage.clear();
       await persistPreferredLanguage(storage, currentLanguage);
-      await loadSettings();
+      const granted = await root.chrome?.permissions?.getAll?.();
+      const origins = optionalOriginsToRemove(granted?.origins);
+      if (origins.length) {
+        await root.chrome.permissions.remove({ origins }).catch(() => false);
+      }
+      currentSettings = settingsApi.normalize();
+      supadataInput.value = "";
+      setModeForProvider("kimi-code");
+      renderProvider();
       setStatus(dataStatus, "allDataDeleted");
     }
 
+    async function loadSettings() {
+      try {
+        const stored = await storage.get(settingsApi.STORAGE_KEY);
+        const migration = settingsApi.migrateProviderSettings(
+          stored[settingsApi.STORAGE_KEY],
+        );
+        currentSettings = migration.settings;
+        supadataInput.value = currentSettings.supadataApiKey;
+        setModeForProvider(currentSettings.activeProvider);
+        renderProvider();
+        if (migration.migrated) {
+          await storage.set({ [settingsApi.STORAGE_KEY]: currentSettings });
+        }
+        await loadOpenRouterModels(false).catch(() => {});
+      } catch (_error) {
+        setStatus(saveStatus, "settingsLoadFailed");
+      }
+    }
+
     form.addEventListener("submit", saveSettings);
-    copyCustomizationPromptBtn.addEventListener(
-      "click",
-      copyCustomizationPrompt,
-    );
-    doc
-      .getElementById("clearCacheBtn")
-      .addEventListener("click", clearCachedDigests);
+    doc.getElementById("testConnectionBtn").addEventListener("click", testConnection);
+    doc.getElementById("deleteCurrentAiKeyBtn").addEventListener("click", deleteCurrentKey);
+    doc.getElementById("refreshModelsBtn").addEventListener("click", () => loadOpenRouterModels(true));
+    doc.getElementById("clearCacheBtn").addEventListener("click", clearCachedDigests);
     doc.getElementById("clearNotesBtn").addEventListener("click", clearNotes);
     doc.getElementById("resetBtn").addEventListener("click", resetAllData);
+    modelSearchInput.addEventListener("input", renderModelOptions);
+    advancedBaseUrlInput.addEventListener("input", renderDraftPermissionOrigin);
+    for (const input of modeInputs) {
+      input.addEventListener("change", () => {
+        captureRenderedProvider();
+        renderProvider();
+        if (input.value === "openrouter") void loadOpenRouterModels(false);
+      });
+    }
+    advancedProviderInput.addEventListener("change", () => {
+      captureRenderedProvider();
+      renderProvider();
+    });
     for (const button of languageButtons) {
       button.addEventListener("click", async () => {
-        const language = button.dataset.language;
-        applyLanguage(language);
-        await persistPreferredLanguage(storage, language);
+        applyLanguage(button.dataset.language);
+        await persistPreferredLanguage(storage, currentLanguage);
       });
+    }
+
+    async function loadOptions() {
+      try {
+        applyLanguage(await readPreferredLanguage(storage));
+      } catch (_error) {
+        applyLanguage("en");
+      }
+      await loadSettings();
     }
 
     if (doc.readyState === "loading") {
@@ -531,16 +879,22 @@ const YTD_OPTIONS = (() => {
   return {
     COPY,
     LANGUAGE_STORAGE_KEY,
-    copyPromptValue,
-    createPromptDrafts,
+    OPENROUTER_MODELS_CACHE_KEY,
+    buildSettingsFromForm,
+    clearProviderKey,
+    providerIdForMode,
+    requiredOriginPattern,
+    requestProviderPermission,
+    optionalOriginsToRemove,
+    filterOpenRouterModels,
+    isModelCacheFresh,
+    fetchOpenRouterModels,
     createStorageAdapter,
     normalizeLanguage,
     persistPreferredLanguage,
     readPreferredLanguage,
     translate,
     updateLanguageButtonState,
-    updateLocalizedPrompt,
-    switchPromptDraft,
     initialize,
   };
 })();
