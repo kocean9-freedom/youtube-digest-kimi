@@ -56,6 +56,29 @@ test("Settings copy covers English and Simplified Chinese", () => {
   assert.doesNotMatch(html, /—/);
 });
 
+test("missing background response tells the user to reload the extension", () => {
+  assert.equal(typeof options.connectionErrorMessage, "function");
+  assert.equal(
+    options.connectionErrorMessage(undefined, "en"),
+    "The extension background is not responding. Reload YouTube Digest at chrome://extensions, then try again.",
+  );
+  assert.equal(
+    options.connectionErrorMessage(undefined, "zh-CN"),
+    "扩展后台没有响应。请在 chrome://extensions 重新加载 YouTube Digest，然后重试。",
+  );
+});
+
+test("provider connection errors remain visible", () => {
+  assert.equal(typeof options.connectionErrorMessage, "function");
+  assert.equal(
+    options.connectionErrorMessage(
+      { success: false, error: "Kimi rejected the API key." },
+      "en",
+    ),
+    "Kimi rejected the API key.",
+  );
+});
+
 test("language preference persists through extension-compatible storage", async () => {
   const storedValues = {};
   const chromeApi = {

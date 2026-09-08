@@ -17,8 +17,9 @@ YouTube Digest is a bring-your-own-key project installed locally from GitHub. It
 
 ![YouTube Digest demo](YouTube%20Digest%20demo.png)
 
-## New in v1.3.0
+## New in v1.3.1
 
+- Replace the ambiguous `Unknown provider error` with a clear reload instruction when an updated Options page is still connected to an older background service worker.
 - Keep Kimi Coding Plan as the default, fixed `kimi-for-coding` experience.
 - Use OpenRouter simple mode to search a cached model directory or enter a model ID manually.
 - Use official / custom advanced mode for OpenAI-compatible services, Anthropic Messages, and Gemini generateContent.
@@ -207,6 +208,7 @@ YouTube Digest will not fall back to generated transcription.
 
 ### AI requests fail
 
+- If **Test connection** says the extension background is not responding, open `chrome://extensions`, click **Reload** on YouTube Digest, reopen Settings, and test again. This is required after local source files change.
 - A `401` or `403` usually means the selected provider's key or account access is invalid.
 - A `429` usually means the selected provider's rate or quota limit was reached.
 - Confirm the model ID, Base URL when editable, and Chrome permission shown in Settings.

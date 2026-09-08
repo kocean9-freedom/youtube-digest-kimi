@@ -215,6 +215,8 @@ const YTD_OPTIONS = (() => {
       connectionOk: ({ provider }) => `${provider} connection succeeded.`,
       connectionFailed: ({ provider, message }) =>
         `${provider} connection failed: ${message}`,
+      backgroundUnavailable:
+        "The extension background is not responding. Reload YouTube Digest at chrome://extensions, then try again.",
       modelsLoading: "Loading the OpenRouter model directory…",
       modelsLoaded: ({ count }) => `Loaded ${count} OpenRouter models.`,
       modelsFailed:
@@ -288,6 +290,8 @@ const YTD_OPTIONS = (() => {
       connectionOk: ({ provider }) => `${provider} 连接成功。`,
       connectionFailed: ({ provider, message }) =>
         `${provider} 连接失败：${message}`,
+      backgroundUnavailable:
+        "扩展后台没有响应。请在 chrome://extensions 重新加载 YouTube Digest，然后重试。",
       modelsLoading: "正在加载 OpenRouter 模型目录……",
       modelsLoaded: ({ count }) => `已加载 ${count} 个 OpenRouter 模型。`,
       modelsFailed: "无法加载模型目录，请手动填写模型 ID。",
@@ -311,6 +315,12 @@ const YTD_OPTIONS = (() => {
     const normalizedLanguage = normalizeLanguage(language);
     const value = COPY[normalizedLanguage][key] ?? COPY.en[key] ?? "";
     return typeof value === "function" ? value(params) : value;
+  }
+
+  function connectionErrorMessage(result, language) {
+    const providerMessage =
+      typeof result?.error === "string" ? result.error.trim() : "";
+    return providerMessage || translate(language, "backgroundUnavailable");
   }
 
   function createStorageAdapter(chromeApi, fallbackStorage) {
@@ -707,7 +717,7 @@ const YTD_OPTIONS = (() => {
           settings: draft,
         });
         if (!result?.success) {
-          throw new Error(result?.error || "Unknown provider error");
+          throw new Error(connectionErrorMessage(result, currentLanguage));
         }
         setStatus(saveStatus, "connectionOk", { provider: provider.name });
       } catch (error) {
@@ -894,6 +904,7 @@ const YTD_OPTIONS = (() => {
     persistPreferredLanguage,
     readPreferredLanguage,
     translate,
+    connectionErrorMessage,
     updateLanguageButtonState,
     initialize,
   };

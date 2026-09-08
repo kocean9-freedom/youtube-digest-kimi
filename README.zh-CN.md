@@ -19,8 +19,9 @@ YouTube Digest 是一个需要自行提供 API Key 的开源项目，通过 GitH
 
 ![YouTube Digest 双语演示](YouTube%20Digest%20demo%20bilingual.png)
 
-## v1.3.0 更新
+## v1.3.1 更新
 
+- 当新版设置页仍连接旧的后台 Service Worker 时，不再显示含糊的 `Unknown provider error`，而是明确提示重新加载扩展。
 - 默认保留 Kimi Coding Plan 和固定的 `kimi-for-coding` 体验。
 - 增加 OpenRouter 简易模式，可搜索已缓存的模型目录，也可手动输入模型 ID。
 - 增加官方 / 自定义高级模式，支持 OpenAI 兼容、Anthropic Messages 和 Gemini generateContent。
@@ -209,6 +210,7 @@ YouTube Digest 不会自动改用 AI 生成字幕。
 
 ### AI 请求失败
 
+- 如果点击 **Test connection** 后提示扩展后台没有响应，请打开 `chrome://extensions`，在 YouTube Digest 卡片上点击“重新加载”，重新打开设置页后再测试。每次修改本地源码后都需要这样重新加载。
 - `401` 或 `403` 通常表示当前提供商的 Key 或账号权限有问题。
 - `429` 通常表示达到了当前提供商的限速或额度上限。
 - 确认模型 ID、可编辑时的 Base URL，以及设置页显示的 Chrome 权限。
