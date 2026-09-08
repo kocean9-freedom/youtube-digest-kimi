@@ -660,6 +660,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ success: false, error: "No YouTube tab found" });
         }
       } catch (err) {
+        if (isMissingContentScriptError(err)) {
+          sendResponse({
+            success: false,
+            error: "CONTENT_SCRIPT_UNAVAILABLE",
+            recoverable: true,
+            userAction: "refresh_youtube_tab",
+          });
+          return;
+        }
         console.error("[YouTube Digest BG] Relay error:", err.message);
         sendResponse({ success: false, error: err.message });
       }
@@ -667,6 +676,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keep channel open for async response
   }
 });
+
+function isMissingContentScriptError(error) {
+  const message = String(error?.message || "");
+  return (
+    message.includes("Could not establish connection") &&
+    message.includes("Receiving end does not exist")
+  );
+}
 
 /**
  * Reads the current video's full details straight from YouTube's player.

@@ -19,8 +19,10 @@ YouTube Digest 是一个需要自行提供 API Key 的开源项目，通过 GitH
 
 ![YouTube Digest 双语演示](YouTube%20Digest%20demo%20bilingual.png)
 
-## v1.3.1 更新
+## v1.3.2 更新
 
+- 将 YouTube 内容脚本暂时未连接识别为可恢复的页面刷新状态，不再记为扩展错误。
+- 侧边栏会直接提示刷新 YouTube 页面，临时连接到旧后台 Service Worker 时也能识别。
 - 当新版设置页仍连接旧的后台 Service Worker 时，不再显示含糊的 `Unknown provider error`，而是明确提示重新加载扩展。
 - 默认保留 Kimi Coding Plan 和固定的 `kimi-for-coding` 体验。
 - 增加 OpenRouter 简易模式，可搜索已缓存的模型目录，也可手动输入模型 ID。
@@ -192,6 +194,7 @@ YouTube Digest 没有账号系统、广告、分析统计或行为追踪。Supad
 - 确认你打开的是标准 `https://www.youtube.com/watch?...` 页面。
 - 在 `chrome://extensions` 中确认 YouTube Digest 已启用，并点击“重新加载”。
 - 重新加载扩展后，刷新 YouTube 页面。
+- 如果 Chrome 仍显示 `Receiving end does not exist`，先清除旧错误记录，再刷新 YouTube 页面并重试。问题已消失后，历史错误仍可能留在列表中。
 - 如果问题仍然存在，让你的编程 Agent 检查扩展。
 
 ### YouTube Digest 提示需要设置

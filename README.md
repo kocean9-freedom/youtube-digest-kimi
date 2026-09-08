@@ -17,8 +17,10 @@ YouTube Digest is a bring-your-own-key project installed locally from GitHub. It
 
 ![YouTube Digest demo](YouTube%20Digest%20demo.png)
 
-## New in v1.3.1
+## New in v1.3.2
 
+- Treat a missing YouTube content script as a recoverable tab-refresh state instead of an extension error.
+- Show a direct refresh instruction in the side panel, including when it is temporarily connected to an older background service worker.
 - Replace the ambiguous `Unknown provider error` with a clear reload instruction when an updated Options page is still connected to an older background service worker.
 - Keep Kimi Coding Plan as the default, fixed `kimi-for-coding` experience.
 - Use OpenRouter simple mode to search a cached model directory or enter a model ID manually.
@@ -190,6 +192,7 @@ There is no YouTube Digest account system, advertising, analytics, or telemetry.
 - Confirm that you are on a standard `https://www.youtube.com/watch?...` page.
 - At `chrome://extensions`, confirm YouTube Digest is enabled and click **Reload**.
 - Refresh the YouTube tab after reloading the extension.
+- If Chrome still lists `Receiving end does not exist`, clear the old entry, refresh the YouTube tab, and retry. Existing error entries can remain visible after the underlying condition is gone.
 - Ask your coding agent to inspect the extension if the problem continues.
 
 ### YouTube Digest asks for setup

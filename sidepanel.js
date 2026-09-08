@@ -510,6 +510,11 @@ async function checkCurrentTab() {
           payload: { action: "getVideoInfo" },
         });
         debugLog("[YouTube Digest Panel] getVideoInfo result:", result);
+        const relayFailure = getContentRelayFailure(result);
+        if (relayFailure) {
+          showError(relayFailure.title, relayFailure.message);
+          return;
+        }
         if (result.success && result.response) {
           currentVideoTitle = result.response.title || "";
           currentChannelName = result.response.channelName || "";
@@ -532,6 +537,26 @@ async function checkCurrentTab() {
     console.error("Tab check error:", error);
     showState("welcome");
   }
+}
+
+function getContentRelayFailure(result) {
+  const rawError = String(result?.error || "");
+  const hasRefreshAction =
+    result?.error === "CONTENT_SCRIPT_UNAVAILABLE" &&
+    result?.userAction === "refresh_youtube_tab";
+  const isLegacyReceiverError =
+    rawError.includes("Could not establish connection") &&
+    rawError.includes("Receiving end does not exist");
+
+  if (!hasRefreshAction && !isLegacyReceiverError) {
+    return null;
+  }
+
+  return {
+    title: "Refresh the YouTube page",
+    message:
+      "YouTube Digest was reloaded after this tab opened. Refresh the YouTube page once, then open the side panel again.",
+  };
 }
 
 function extractVideoId(url) {
@@ -2892,6 +2917,7 @@ function setTranslatingSpinner(show) {
 // Pure helpers are exposed for the repository's Node tests. The extension does
 // not read this object at runtime.
 globalThis.__YTD_TRANSCRIPT_TESTING__ = {
+  getContentRelayFailure,
   sendTranslationMessage,
   groupTranscriptEntries,
   splitOversizedThought,

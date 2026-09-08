@@ -23,7 +23,7 @@ test("manifest uses minimized install-time permissions", () => {
     "http://localhost/*",
     "http://127.0.0.1/*",
   ]);
-  assert.equal(manifest.version, "1.3.1");
+  assert.equal(manifest.version, "1.3.2");
 });
 
 test("release copy documents current scope without em dashes", () => {

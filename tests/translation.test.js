@@ -87,6 +87,7 @@ function loadBackgroundHelpers({
     setPanelBehavior() {},
     setOptions: () => Promise.resolve(),
   },
+  tabs = {},
 } = {}) {
   const listeners = { addListener() {} };
   const runtimeMessageListeners = [];
@@ -133,7 +134,7 @@ function loadBackgroundHelpers({
         getURL: (resourcePath) => `chrome-extension://test/${resourcePath}`,
         sendMessage: () => Promise.resolve({ success: true }),
       },
-      tabs: { onUpdated: listeners, onActivated: listeners },
+      tabs: { onUpdated: listeners, onActivated: listeners, ...tabs },
     },
   };
   if (permissions) sandbox.chrome.permissions = permissions;
@@ -153,6 +154,88 @@ function loadBackgroundHelpers({
     },
   };
 }
+
+test("a missing YouTube content script returns a recoverable refresh action", async () => {
+  const loggedErrors = [];
+  const background = loadBackgroundHelpers({
+    consoleImpl: {
+      log() {},
+      warn() {},
+      error(...args) {
+        loggedErrors.push(args);
+      },
+    },
+    tabs: {
+      query: async () => [
+        {
+          id: 17,
+          url: "https://www.youtube.com/watch?v=test-video",
+        },
+      ],
+      sendMessage: async () => {
+        throw new Error(
+          "Could not establish connection. Receiving end does not exist.",
+        );
+      },
+    },
+  });
+
+  const result = await background.dispatchRuntimeMessage({
+    action: "relayToContent",
+    payload: { action: "getVideoInfo" },
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    success: false,
+    error: "CONTENT_SCRIPT_UNAVAILABLE",
+    recoverable: true,
+    userAction: "refresh_youtube_tab",
+  });
+  assert.equal(loggedErrors.length, 0);
+});
+
+test("the side panel explains how to recover a missing content script", () => {
+  const { getContentRelayFailure } = loadSidepanelHelpers();
+
+  assert.deepEqual(
+    JSON.parse(
+      JSON.stringify(
+        getContentRelayFailure({
+          success: false,
+          error: "CONTENT_SCRIPT_UNAVAILABLE",
+          recoverable: true,
+          userAction: "refresh_youtube_tab",
+        }),
+      ),
+    ),
+    {
+      title: "Refresh the YouTube page",
+      message:
+        "YouTube Digest was reloaded after this tab opened. Refresh the YouTube page once, then open the side panel again.",
+    },
+  );
+});
+
+test("the side panel recognizes the raw receiver error from an older background", () => {
+  const { getContentRelayFailure } = loadSidepanelHelpers();
+
+  assert.deepEqual(
+    JSON.parse(
+      JSON.stringify(
+        getContentRelayFailure({
+          success: false,
+          error:
+            "Could not establish connection. Receiving end does not exist.",
+        }),
+      ),
+    ),
+    {
+      title: "Refresh the YouTube page",
+      message:
+        "YouTube Digest was reloaded after this tab opened. Refresh the YouTube page once, then open the side panel again.",
+    },
+  );
+});
 
 test("non-YouTube tabs explicitly close before their panel is disabled", async () => {
   const calls = [];
