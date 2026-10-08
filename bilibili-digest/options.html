@@ -1,0 +1,11 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bilibili Digest · 模型设置</title><link rel="stylesheet" href="sidepanel.css"></head>
+<body><div class="settings-page"><header class="masthead"><div class="eyebrow">BILIBILI DIGEST <span class="edition">个人学习版</span></div><div class="heading-row"><h1>选择你的学习助手。</h1></div><p class="intro">字幕提取无需配置。AI 功能使用你自己的服务账号。</p></header>
+<main class="settings-content"><h2>模型连接</h2><p>Key 仅保存在这个扩展的本地存储中，不与 YouTube 版共享。只在你主动生成概览、翻译、讲解或润色时使用。</p>
+<label for="provider">模型服务</label><select id="provider"></select>
+<label for="apiKey">当前服务的 API Key</label><div class="key-row"><input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="在这里自行填写，不要发送到聊天中"><button id="deleteKey" type="button">删除此 Key</button></div>
+<label for="model">模型 ID</label><input id="model" type="text" autocomplete="off" spellcheck="false" placeholder="填写服务商文档中的准确模型 ID">
+<label for="baseUrl">接口地址</label><input id="baseUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://你的接口/v1">
+<div id="providerDocs" class="provider-docs"></div><p id="providerHint" class="hint"></p>
+<div class="settings-actions"><button id="saveSettings" class="primary" type="button">保存设置</button><button id="testConnection" type="button">测试当前配置</button></div><div id="status" class="status" role="status" aria-live="polite"></div>
+<div class="settings-note"><p>保存和测试时，Chrome 可能请求你允许连接所选服务的准确网址。自定义地址必须使用 HTTPS，本机 localhost / 127.0.0.1 除外。</p><p>切换服务不会复制 Key；尚未保存的草稿会丢弃。测试连接会发送一次短请求，可能消耗账号额度；不会自动重试或切换模型。</p><p>OpenRouter 请手动填写模型 ID，内容可能转交所选模型的托管方。Kimi Coding Plan 主要面向编程工具，使用前请核对账号权益和服务规则。</p><p><a href="README.md" target="_blank" rel="noreferrer">安装、使用说明与二创来源 ↗</a> · <a href="PRIVACY.md" target="_blank" rel="noreferrer">数据流向 ↗</a></p></div>
+</main><footer><span>基于 YouTube Digest 的个人衍生版本</span><a href="THIRD_PARTY_NOTICES.md" target="_blank" rel="noreferrer">原作者与许可 ↗</a></footer></div><script src="settings.js"></script><script src="ai-providers.js"></script><script src="options.js"></script></body></html>

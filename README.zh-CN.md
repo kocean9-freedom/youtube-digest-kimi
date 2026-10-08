@@ -4,6 +4,8 @@
 
 > **衍生项目说明：** 本仓库基于 Zara Zhang 的原项目 [zarazhangrui/youtube-digest](https://github.com/zarazhangrui/youtube-digest) 继续开发，保留原 MIT 版权与许可声明，不代表原作者发布的官方上游版本。
 
+> **B 站个人版：** 本仓库另提供独立的 [Bilibili Digest · 字幕笔记](bilibili-digest/README.md)，支持 B 站字幕提取、搜索、导出给 Codex，以及可选 AI 学习功能。安装时选择 `bilibili-digest/` 子目录；本目录的原 YouTube 扩展继续独立使用。B 站版同样保留原作者 Zara Zhang 的 MIT 许可和二创来源。
+
 把每个 YouTube 视频变成一份可以深入学习的资料。YouTube Digest 把字幕、双语翻译、AI 概览、内容讲解和时间戳笔记放进同一个 Chrome 侧边栏，让你可以持续学习视频中的知识和语言，同时不丢失原视频上下文。
 
 - 把零碎字幕变成清晰、可搜索的学习资料。

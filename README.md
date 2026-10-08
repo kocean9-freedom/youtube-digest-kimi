@@ -4,6 +4,8 @@
 
 > **Derivative project:** This repository builds on Zara Zhang's original [zarazhangrui/youtube-digest](https://github.com/zarazhangrui/youtube-digest), retains its MIT copyright and license notice, and is not an official upstream release.
 
+> **Personal Bilibili edition:** This repository also includes [Bilibili Digest](bilibili-digest/README.md), a separate Chrome extension for Bilibili subtitles, search, Codex-friendly exports, optional AI learning tools, and notes. Load the `bilibili-digest/` subdirectory for this edition. It preserves Zara Zhang’s original MIT notice and documents both levels of derivation.
+
 Turn every YouTube video into a resource for deep learning. YouTube Digest brings transcripts, bilingual translation, AI overviews, explanations, and timestamped notes into one Chrome side panel, so you can study ideas and language without losing your place.
 
 - Turn captions into a readable, searchable learning resource.

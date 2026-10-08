@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "Bilibili Digest · 字幕笔记",
+  "version": "0.1.0",
+  "minimum_chrome_version": "116",
+  "description": "个人 B 站学习侧边栏：字幕提取、搜索、时间戳、导出给 Codex，以及按需 AI 概览、翻译、讲解和笔记。",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.bilibili.com/*",
+    "https://api.bilibili.com/*",
+    "https://*.hdslb.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "打开 Bilibili Digest",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.bilibili.com/video/*"
+      ],
+      "js": [
+        "core.js",
+        "source.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
